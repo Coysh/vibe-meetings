@@ -31,6 +31,31 @@ final class RecordingController {
         self.meetingHandle = handle
         let audioURL = handle.folderURL.appendingPathComponent(MeetingFolder.audioFilename)
 
+        // 1. Make sure the transcription model is loaded before audio capture
+        //    starts. loadModel is idempotent — instant on second+ runs, but on
+        //    the very first run this is the model download (medium ≈ 1.5 GB).
+        //    The privacy badge flips to yellow during the download.
+        state = .preparing
+        let modelId = env.selectedModelId
+        env.privacyState = .downloadingModel(progress: 0)
+        do {
+            try await env.activeTranscriptionEngine.loadModel(id: modelId) { p in
+                Task { @MainActor in
+                    self.env.privacyState = .downloadingModel(progress: p)
+                }
+            }
+        } catch {
+            state = .error("Could not load model \(modelId): \(error.localizedDescription)")
+            env.privacyState = .localOnly
+            return
+        }
+        // Reset privacy badge to whatever Ollama state we resolved at boot.
+        env.privacyState = (env.ollamaBaseURL.host.flatMap { LocalhostOnlySession.isLoopback($0) } == false
+                            && env.ollamaBaseURL.host != nil)
+            ? .lan(host: env.ollamaBaseURL.host!)
+            : .localOnly
+
+        // 2. Start audio capture.
         do {
             try await coordinator.start(writingAudioTo: audioURL)
         } catch {
@@ -123,11 +148,18 @@ struct RecordingBarView: View {
                 .fill(controller.state == .recording ? Color.red : Color.gray)
                 .frame(width: 12, height: 12)
 
-            Text(controller.elapsed.formattedTimestamp)
-                .font(.title3.monospacedDigit())
-
-            LevelMeterView(level: controller.micLevel, label: "You")
-            LevelMeterView(level: controller.systemLevel, label: "Others")
+            if case .preparing = controller.state {
+                ProgressView().controlSize(.small)
+                Text("Loading model…").font(.caption).foregroundStyle(.secondary)
+            } else if case .error(let msg) = controller.state {
+                Image(systemName: "exclamationmark.triangle.fill").foregroundStyle(.orange)
+                Text(msg).font(.caption).foregroundStyle(.orange).lineLimit(1)
+            } else {
+                Text(controller.elapsed.formattedTimestamp)
+                    .font(.title3.monospacedDigit())
+                LevelMeterView(level: controller.micLevel, label: "You")
+                LevelMeterView(level: controller.systemLevel, label: "Others")
+            }
 
             Spacer()
 

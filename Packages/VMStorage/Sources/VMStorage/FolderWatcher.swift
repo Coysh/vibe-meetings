@@ -41,6 +41,7 @@ public final class FolderWatcher: @unchecked Sendable {
             0.5,
             FSEventStreamCreateFlags(
                 kFSEventStreamCreateFlagFileEvents
+                | kFSEventStreamCreateFlagUseCFTypes
                 | kFSEventStreamCreateFlagUseExtendedData
                 | kFSEventStreamCreateFlagNoDefer
             )
