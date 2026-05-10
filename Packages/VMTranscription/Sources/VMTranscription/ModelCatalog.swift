@@ -82,7 +82,12 @@ public enum ModelCatalog {
         entries.first(where: { $0.id == id })
     }
 
-    /// Default install root: `~/Library/Application Support/VibeMeetings/Models/<engineKind>/<id>/`.
+    /// Default install root: `~/Library/Application Support/VibeMeetings/Models/<engineKind>/<dirName>/`.
+    /// For WhisperKit entries the directory name is the HuggingFace variant name
+    /// (sourceURL.lastPathComponent, e.g. "openai_whisper-medium") because that
+    /// is the name WhisperKit uses when it downloads and later looks up the bundle.
+    /// Using a different name causes WhisperKit to download to the right place but
+    /// then load from the wrong (empty) directory.
     public static func defaultInstallURL(for entry: Entry) throws -> URL {
         let support = try FileManager.default.url(
             for: .applicationSupportDirectory,
@@ -90,11 +95,14 @@ public enum ModelCatalog {
             appropriateFor: nil,
             create: true
         )
+        let dirName = entry.engineKind == "whisperkit"
+            ? entry.sourceURL.lastPathComponent   // e.g. "openai_whisper-medium"
+            : entry.id                             // e.g. "ggml-medium.bin"
         return support
             .appendingPathComponent("VibeMeetings")
             .appendingPathComponent("Models")
             .appendingPathComponent(entry.engineKind)
-            .appendingPathComponent(entry.id)
+            .appendingPathComponent(dirName)
     }
 
     public static func isDownloaded(_ entry: Entry) -> Bool {
