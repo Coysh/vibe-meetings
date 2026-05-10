@@ -38,6 +38,10 @@ public final class WhisperKitEngine: TranscriptionEngine, @unchecked Sendable {
         // WhisperKit accepts a model folder URL directly; if the bundle isn't on disk,
         // it will download it from the source you provide. Pass our model storage path
         // so everything lives under Application Support.
+        //
+        // Check for actual file content, not just directory existence — an interrupted
+        // download leaves an empty directory that would falsely suppress the download flag.
+        let hasModelFiles = (try? FileManager.default.contentsOfDirectory(atPath: installURL.path))?.isEmpty == false
         let config = WhisperKitConfig(
             model: id,
             modelFolder: installURL.path,
@@ -45,7 +49,7 @@ public final class WhisperKitEngine: TranscriptionEngine, @unchecked Sendable {
             logLevel: .none,
             prewarm: true,
             load: true,
-            download: !FileManager.default.fileExists(atPath: installURL.path)
+            download: !hasModelFiles
         )
         let pipe = try await WhisperKit(config)
         progress(1.0)
