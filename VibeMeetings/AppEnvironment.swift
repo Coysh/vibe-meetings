@@ -32,13 +32,23 @@ final class AppEnvironment {
     /// Selected Ollama model id (resolved at runtime from `/api/tags`).
     var selectedOllamaModelId: String
 
+    /// User-configured Ollama base URL. Defaults to `http://127.0.0.1:11434`;
+    /// can be pointed at a self-hosted instance on the LAN
+    /// (e.g. `http://192.168.1.50:11434`). The single non-loopback host this
+    /// app's `LocalhostOnlySession` allows.
+    var ollamaBaseURL: URL
+
     /// Live state snapshot for the privacy badge.
     var privacyState: PrivacyState = .localOnly
 
     enum PrivacyState: Sendable, Equatable {
         case localOnly
+        case lan(host: String)
         case downloadingModel(progress: Double)
     }
+
+    static let defaultOllamaURL = URL(string: "http://127.0.0.1:11434")!
+    private static let ollamaURLKey = "VibeMeetings.OllamaBaseURL"
 
     init() throws {
         let defaults = UserDefaults.standard
@@ -75,11 +85,18 @@ final class AppEnvironment {
         self.selectedModelId = defaults.string(forKey: modelKey) ?? "whisper-medium"
         self.selectedOllamaModelId = defaults.string(forKey: ollamaModelKey) ?? "llama3.1:8b-instruct-q4_K_M"
 
-        self.summarizationEngine = OllamaEngine(promptBundle: .main)
+        let storedOllama = (defaults.string(forKey: Self.ollamaURLKey)).flatMap(URL.init(string:))
+        let resolvedOllama = storedOllama ?? Self.defaultOllamaURL
+        self.ollamaBaseURL = resolvedOllama
+        AppEnvironment.applyAllowedOllamaHost(resolvedOllama)
+
+        self.summarizationEngine = OllamaEngine(baseURL: resolvedOllama, promptBundle: .main)
 
         let cal = EventKitCalendarService()
         self.calendarService = cal
         self.bannerCoordinator = BannerCoordinator(calendar: cal)
+
+        self.privacyState = AppEnvironment.privacyState(for: resolvedOllama)
     }
 
     func setRoot(_ url: URL) throws {
@@ -88,5 +105,34 @@ final class AppEnvironment {
         if let bookmark = try? url.bookmarkData(options: [.withSecurityScope], includingResourceValuesForKeys: nil, relativeTo: nil) {
             UserDefaults.standard.set(bookmark, forKey: "VibeMeetings.RootURL.bookmark")
         }
+    }
+
+    /// Update the Ollama endpoint, persist, rebuild the engine, and update
+    /// the LocalhostOnlySession allowlist + privacy badge to match.
+    func setOllamaBaseURL(_ url: URL) {
+        self.ollamaBaseURL = url
+        UserDefaults.standard.set(url.absoluteString, forKey: Self.ollamaURLKey)
+        AppEnvironment.applyAllowedOllamaHost(url)
+        self.summarizationEngine = OllamaEngine(baseURL: url, promptBundle: .main)
+        self.privacyState = AppEnvironment.privacyState(for: url)
+    }
+
+    private static func applyAllowedOllamaHost(_ url: URL) {
+        guard let host = url.host?.lowercased() else {
+            LocalhostOnlySession.setAllowedExtraHost(nil)
+            return
+        }
+        if LocalhostOnlySession.isLoopback(host) {
+            LocalhostOnlySession.setAllowedExtraHost(nil)
+        } else {
+            LocalhostOnlySession.setAllowedExtraHost(host)
+        }
+    }
+
+    private static func privacyState(for url: URL) -> PrivacyState {
+        guard let host = url.host, !LocalhostOnlySession.isLoopback(host) else {
+            return .localOnly
+        }
+        return .lan(host: host)
     }
 }

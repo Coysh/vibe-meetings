@@ -8,8 +8,10 @@ A native macOS desktop app that records, transcribes, and summarises meetings
 - 📝 **Reliable transcripts first.** Pluggable engines: WhisperKit (default,
   Apple Silicon optimised) and whisper.cpp (scaffolded — see notes below).
   Default model is `whisper-medium` (~1.5 GB, downloaded on first run).
-- 🧠 **Local LLM summaries** via your own [Ollama](https://ollama.com)
-  instance on `127.0.0.1:11434`.
+- 🧠 **Local LLM summaries** via your own [Ollama](https://ollama.com).
+  Default `http://127.0.0.1:11434`; you can also point Settings → Engines →
+  Ollama at a self-hosted instance on your LAN
+  (e.g. `http://192.168.1.50:11434`) and skip installing Ollama on this Mac.
 - 🗂 **Filesystem-native storage.** Each meeting is a folder under
   `~/MeetingNotes/` containing `meeting.json`, `transcript.md`, `summary.md`,
   `segments.json`, and (optionally) `audio.m4a` (mic on L, system on R).
@@ -114,12 +116,16 @@ thanks to FSEvents, and the `meeting.id` UUID survives moves.
 
 - App Sandbox is **off** (Core Audio Tap requires it). Hardened Runtime is on.
 - The only network connections this app ever makes:
-  1. `127.0.0.1:11434` — your local Ollama, only when summarizing.
+  1. The Ollama URL configured in Settings (default `127.0.0.1:11434`,
+     loopback). Can be pointed at a self-hosted Ollama on your LAN — that one
+     host is then the only non-loopback destination the app is allowed to
+     reach. The privacy badge in the toolbar switches to blue and reads
+     `LAN: <host>` when this is in use.
   2. Hugging Face / argmax CDN — **only when you click "Download"** for a
      transcription model.
-- All `URLSession` usage routes through `LocalhostOnlySession` which rejects
-  any non-loopback host. The model downloader is the only deliberate
-  exception.
+- All `URLSession` usage routes through `LocalhostOnlySession`, which rejects
+  any host that isn't loopback or the user-configured Ollama host. The model
+  downloader is the only deliberate other exception.
 - No telemetry. No analytics. No crash reporting SDK. No auto-update.
 
 ## What to verify on a real Mac (the parts that need device-level testing)
