@@ -56,9 +56,12 @@ public final class WhisperKitEngine: TranscriptionEngine, @unchecked Sendable {
         let installURL = try ModelCatalog.defaultInstallURL(for: entry)
         let exists = FileManager.default.fileExists(atPath: installURL.path)
 
+        // WhisperKit's modelFolder is the *parent* directory; it appends the
+        // model id to get the actual bundle path. Passing installURL directly
+        // caused it to look one level too deep and report "model not found".
         let config = WhisperKitConfig(
             model: id,
-            modelFolder: installURL.path,
+            modelFolder: installURL.deletingLastPathComponent().path,
             verbose: false,
             logLevel: .none,
             prewarm: true,

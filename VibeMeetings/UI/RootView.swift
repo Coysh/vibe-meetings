@@ -5,14 +5,13 @@ import VMStorage
 struct RootView: View {
     @Environment(AppEnvironment.self) private var env
     @State private var selection: SidebarSelection?
-    @State private var rootNode: FolderNode?
     @State private var newMeetingSheet = false
     @State private var preselectedEventID: String?
 
     var body: some View {
         NavigationSplitView {
             FolderTreeView(
-                root: rootNode,
+                root: env.folderTree,
                 selection: $selection
             )
             .navigationTitle(env.rootURL.lastPathComponent)
@@ -52,7 +51,7 @@ struct RootView: View {
             }
             env.bannerCoordinator.start()
             for await tree in env.meetingStore.tree {
-                rootNode = tree
+                env.folderTree = tree
             }
         }
         .toolbar {
@@ -79,7 +78,7 @@ struct RootView: View {
     /// sidebar selection: the selected folder, the selected meeting's parent,
     /// or root.
     private func resolvedParentForNewMeeting() -> FolderNode? {
-        guard let root = rootNode else { return nil }
+        guard let root = env.folderTree else { return nil }
         switch selection {
         case .folder(let url):
             return findNode(at: url, in: root) ?? root

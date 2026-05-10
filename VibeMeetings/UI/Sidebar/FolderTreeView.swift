@@ -53,6 +53,9 @@ struct FolderTreeView: View {
             NewFolderSheet(parent: target) { name in
                 Task {
                     _ = try? await env.meetingStore.createFolder(at: target, name: name)
+                    // Refresh the tree before dismissing so the new folder is
+                    // visible in the sidebar the moment the sheet closes.
+                    await env.refreshFolderTree()
                     newFolderTarget = nil
                 }
             } onCancel: { newFolderTarget = nil }

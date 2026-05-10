@@ -38,6 +38,11 @@ final class AppEnvironment {
     /// app's `LocalhostOnlySession` allows.
     var ollamaBaseURL: URL
 
+    /// Current folder tree, kept in sync with `meetingStore`. Owned here so
+    /// views can read it without subscribing to the async stream themselves,
+    /// and so that a refresh after folder creation lands before sheet dismissal.
+    var folderTree: FolderNode?
+
     /// Live state snapshot for the privacy badge.
     var privacyState: PrivacyState = .localOnly
 
@@ -99,6 +104,13 @@ final class AppEnvironment {
         self.bannerCoordinator = BannerCoordinator(calendar: cal)
 
         self.privacyState = AppEnvironment.privacyState(for: resolvedOllama)
+    }
+
+    /// Fetch the latest tree from the store and update `folderTree` on the
+    /// main actor. Call this after any mutation (create/rename/delete) to
+    /// ensure the sidebar reflects the change before the calling sheet closes.
+    func refreshFolderTree() async {
+        folderTree = await meetingStore.currentTree()
     }
 
     func setRoot(_ url: URL) throws {
