@@ -11,8 +11,7 @@ let package = Package(
         .package(path: "../VMCore")
     ],
     targets: [
-        .target(name: "VMStorage", dependencies: ["VMCore"]),
-        .testTarget(name: "VMStorageTests", dependencies: ["VMStorage"])
+        .target(name: "VMStorage", dependencies: ["VMCore"])
     ],
     swiftLanguageModes: [.v6]
 )

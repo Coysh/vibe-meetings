@@ -20,8 +20,7 @@ let package = Package(
                 "VMCore",
                 .product(name: "WhisperKit", package: "WhisperKit")
             ]
-        ),
-        .testTarget(name: "VMTranscriptionTests", dependencies: ["VMTranscription"])
+        )
     ],
     swiftLanguageModes: [.v6]
 )

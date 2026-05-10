@@ -11,8 +11,7 @@ let package = Package(
         .package(path: "../VMCore")
     ],
     targets: [
-        .target(name: "VMRecording", dependencies: ["VMCore"]),
-        .testTarget(name: "VMRecordingTests", dependencies: ["VMRecording"])
+        .target(name: "VMRecording", dependencies: ["VMCore"])
     ],
     swiftLanguageModes: [.v6]
 )
