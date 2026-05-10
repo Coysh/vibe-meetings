@@ -4,8 +4,7 @@ import VMStorage
 
 struct RootView: View {
     @Environment(AppEnvironment.self) private var env
-    @State private var selectedFolder: FolderNode?
-    @State private var selectedMeetingID: UUID?
+    @State private var selection: SidebarSelection?
     @State private var rootNode: FolderNode?
     @State private var newMeetingSheet = false
     @State private var preselectedEventID: String?
@@ -14,8 +13,7 @@ struct RootView: View {
         NavigationSplitView {
             FolderTreeView(
                 root: rootNode,
-                selectedFolder: $selectedFolder,
-                selectedMeetingID: $selectedMeetingID
+                selection: $selection
             )
             .navigationTitle(env.rootURL.lastPathComponent)
             .frame(minWidth: 240)
@@ -26,7 +24,7 @@ struct RootView: View {
                     Divider()
                 }
                 Group {
-                    if let id = selectedMeetingID {
+                    if let id = selection?.meetingID {
                         MeetingDetailView(meetingID: id)
                             .id(id)
                     } else {
@@ -63,9 +61,9 @@ struct RootView: View {
             }
         }
         .sheet(isPresented: $newMeetingSheet, onDismiss: { preselectedEventID = nil }) {
-            if let parent = selectedFolder ?? rootNode {
+            if let parent = resolvedParentForNewMeeting() {
                 NewMeetingSheet(parentFolder: parent, preselectedEventID: preselectedEventID) { handle in
-                    selectedMeetingID = handle.meeting.id
+                    selection = .meeting(handle.meeting.id)
                     let c = RecordingController(env: env)
                     env.activeRecordingController = c
                     Task { await c.start(handle: handle) }
@@ -76,6 +74,49 @@ struct RootView: View {
             newMeetingSheet = true
         }
     }
+
+    /// The folder a new meeting should be created inside, given the current
+    /// sidebar selection: the selected folder, the selected meeting's parent,
+    /// or root.
+    private func resolvedParentForNewMeeting() -> FolderNode? {
+        guard let root = rootNode else { return nil }
+        switch selection {
+        case .folder(let url):
+            return findNode(at: url, in: root) ?? root
+        case .meeting(let id):
+            if let m = findMeetingNode(id: id, in: root),
+               let parent = findParent(of: m, in: root) {
+                return parent
+            }
+            return root
+        case nil:
+            return root
+        }
+    }
+}
+
+private func findNode(at url: URL, in node: FolderNode) -> FolderNode? {
+    if node.url.standardizedFileURL == url.standardizedFileURL { return node }
+    for child in node.children {
+        if let hit = findNode(at: url, in: child) { return hit }
+    }
+    return nil
+}
+
+private func findMeetingNode(id: UUID, in node: FolderNode) -> FolderNode? {
+    if node.isMeeting, node.meeting?.id == id { return node }
+    for child in node.children {
+        if let hit = findMeetingNode(id: id, in: child) { return hit }
+    }
+    return nil
+}
+
+private func findParent(of target: FolderNode, in node: FolderNode) -> FolderNode? {
+    if node.children.contains(where: { $0.id == target.id }) { return node }
+    for child in node.children {
+        if let hit = findParent(of: target, in: child) { return hit }
+    }
+    return nil
 }
 
 private struct EmptyDetailView: View {
