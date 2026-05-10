@@ -68,8 +68,11 @@ public final class WhisperKitEngine: TranscriptionEngine, @unchecked Sendable {
         let pipe = try await WhisperKit(config)
         progress(1.0)
 
+        // Box the pipeline before capturing it in the @Sendable withLock
+        // closure — WhisperKit itself isn't Sendable.
+        let box = PipelineBox(value: pipe)
         state.withLock { s in
-            s.pipeline = PipelineBox(value: pipe)
+            s.pipeline = box
             s.loadedModelId = id
         }
     }
