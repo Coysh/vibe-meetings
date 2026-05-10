@@ -99,6 +99,10 @@ public enum ModelCatalog {
 
     public static func isDownloaded(_ entry: Entry) -> Bool {
         guard let url = try? defaultInstallURL(for: entry) else { return false }
-        return FileManager.default.fileExists(atPath: url.path)
+        let fm = FileManager.default
+        guard fm.fileExists(atPath: url.path) else { return false }
+        // An empty directory is left behind by a failed or interrupted download.
+        // Treat it as not-downloaded so the user can retry.
+        return (try? fm.contentsOfDirectory(atPath: url.path))?.isEmpty == false
     }
 }

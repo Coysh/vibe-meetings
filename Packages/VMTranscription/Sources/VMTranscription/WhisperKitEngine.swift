@@ -54,14 +54,17 @@ public final class WhisperKitEngine: TranscriptionEngine, @unchecked Sendable {
         }
 
         let installURL = try ModelCatalog.defaultInstallURL(for: entry)
-        let exists = FileManager.default.fileExists(atPath: installURL.path)
+        let exists = ModelCatalog.isDownloaded(entry)
 
-        // WhisperKit's modelFolder is the *parent* directory; it appends the
-        // model id to get the actual bundle path. Passing installURL directly
-        // caused it to look one level too deep and report "model not found".
+        // WhisperKit's `modelFolder` is the exact directory where component
+        // files (MelSpectrogram.mlmodelc etc.) live. Its `model` parameter
+        // must be the HuggingFace variant name — "openai_whisper-medium" not
+        // our internal catalog id "whisper-medium". We derive it from the
+        // sourceURL which already encodes the correct name.
+        let whisperKitModelName = entry.sourceURL.lastPathComponent
         let config = WhisperKitConfig(
-            model: id,
-            modelFolder: installURL.deletingLastPathComponent().path,
+            model: whisperKitModelName,
+            modelFolder: installURL.path,
             verbose: false,
             logLevel: .none,
             prewarm: true,
