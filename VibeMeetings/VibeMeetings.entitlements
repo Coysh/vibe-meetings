@@ -1,0 +1,21 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <!--
+      App Sandbox is intentionally disabled. The Core Audio Tap APIs and aggregate-device
+      creation we rely on for system audio capture are not available in any reliable form
+      under the sandbox. Hardened Runtime + minimal entitlements is the security posture.
+    -->
+    <key>com.apple.security.app-sandbox</key>
+    <false/>
+
+    <!-- Allow JIT for CoreML/MLX paths used by WhisperKit. -->
+    <key>com.apple.security.cs.allow-jit</key>
+    <true/>
+
+    <!-- Microphone access. -->
+    <key>com.apple.security.device.audio-input</key>
+    <true/>
+</dict>
+</plist>
