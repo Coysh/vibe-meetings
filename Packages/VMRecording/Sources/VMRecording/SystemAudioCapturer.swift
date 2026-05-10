@@ -22,9 +22,9 @@ import VMCore
 public final class SystemAudioCapturer: @unchecked Sendable {
     private let converter = AudioFormatConverter()
     private let pcmContinuation: AsyncStream<PCMChunk>.Continuation
-    private let bufferContinuation: AsyncStream<AVAudioPCMBuffer>.Continuation
+    private let bufferContinuation: AsyncStream<SendableAudioBuffer>.Continuation
     public let pcm: AsyncStream<PCMChunk>
-    public let buffers: AsyncStream<AVAudioPCMBuffer>
+    public let buffers: AsyncStream<SendableAudioBuffer>
 
     private var tapID: AudioObjectID = kAudioObjectUnknown
     private var aggregateID: AudioObjectID = kAudioObjectUnknown
@@ -37,7 +37,7 @@ public final class SystemAudioCapturer: @unchecked Sendable {
         self.pcm = AsyncStream { pCont = $0 }
         self.pcmContinuation = pCont
 
-        var bCont: AsyncStream<AVAudioPCMBuffer>.Continuation!
+        var bCont: AsyncStream<SendableAudioBuffer>.Continuation!
         self.buffers = AsyncStream { bCont = $0 }
         self.bufferContinuation = bCont
     }
@@ -145,7 +145,7 @@ public final class SystemAudioCapturer: @unchecked Sendable {
             }
         }
 
-        bufferContinuation.yield(pcm)
+        bufferContinuation.yield(SendableAudioBuffer(pcm))
         let samples = (try? converter.convert(pcm)) ?? []
         if !samples.isEmpty {
             let ts = MicrophoneCapturer.hostTime(hostTime) - startEpoch

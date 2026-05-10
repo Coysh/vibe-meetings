@@ -55,12 +55,14 @@ public final class DualChannelM4AWriter: @unchecked Sendable {
         }
     }
 
-    public func appendMic(_ buffer: AVAudioPCMBuffer) {
+    public func appendMic(_ wrapper: SendableAudioBuffer) {
+        let buffer = wrapper.buffer
         guard let samples = try? micConverter.convert(buffer) else { return }
         queue.async { self.micBuffer.append(contentsOf: samples); self.flushIfReady() }
     }
 
-    public func appendSystem(_ buffer: AVAudioPCMBuffer) {
+    public func appendSystem(_ wrapper: SendableAudioBuffer) {
+        let buffer = wrapper.buffer
         guard let samples = try? sysConverter.convert(buffer) else { return }
         queue.async { self.sysBuffer.append(contentsOf: samples); self.flushIfReady() }
     }

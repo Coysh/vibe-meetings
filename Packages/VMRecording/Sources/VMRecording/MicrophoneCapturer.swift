@@ -1,14 +1,16 @@
 import AVFoundation
 import VMCore
 
-/// Captures mic audio with `AVAudioEngine`, emits `PCMChunk`s and raw `AVAudioPCMBuffer`s.
+/// Captures mic audio with `AVAudioEngine`, emits `PCMChunk`s and raw audio
+/// buffers (wrapped in `SendableAudioBuffer` so they can travel through the
+/// `AsyncStream` under Swift 6 strict concurrency).
 public final class MicrophoneCapturer: @unchecked Sendable {
     private let engine = AVAudioEngine()
     private let converter = AudioFormatConverter()
     private let pcmContinuation: AsyncStream<PCMChunk>.Continuation
-    private let bufferContinuation: AsyncStream<AVAudioPCMBuffer>.Continuation
+    private let bufferContinuation: AsyncStream<SendableAudioBuffer>.Continuation
     public let pcm: AsyncStream<PCMChunk>
-    public let buffers: AsyncStream<AVAudioPCMBuffer>
+    public let buffers: AsyncStream<SendableAudioBuffer>
     public private(set) var startEpoch: TimeInterval = 0
 
     public init() {
@@ -16,7 +18,7 @@ public final class MicrophoneCapturer: @unchecked Sendable {
         self.pcm = AsyncStream { pCont = $0 }
         self.pcmContinuation = pCont
 
-        var bCont: AsyncStream<AVAudioPCMBuffer>.Continuation!
+        var bCont: AsyncStream<SendableAudioBuffer>.Continuation!
         self.buffers = AsyncStream { bCont = $0 }
         self.bufferContinuation = bCont
     }
@@ -31,7 +33,8 @@ public final class MicrophoneCapturer: @unchecked Sendable {
 
         input.installTap(onBus: 0, bufferSize: 4096, format: format) { [weak self] buffer, when in
             guard let self else { return }
-            self.bufferContinuation.yield(buffer.copy() as! AVAudioPCMBuffer)
+            let copy = buffer.copy() as! AVAudioPCMBuffer
+            self.bufferContinuation.yield(SendableAudioBuffer(copy))
             let samples = (try? self.converter.convert(buffer)) ?? []
             if !samples.isEmpty {
                 let ts = Self.hostTime(when.hostTime) - self.startEpoch
