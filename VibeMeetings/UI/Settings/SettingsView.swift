@@ -43,6 +43,9 @@ private struct GeneralSettingsView: View {
 private struct EngineSettingsView: View {
     @Environment(AppEnvironment.self) private var env
     @State private var engineKind: String = "whisperkit"
+    @State private var models: [TranscriptionModelInfo] = []
+    @State private var downloadingID: String? = nil
+    @State private var downloadError: String? = nil
     @State private var ollamaURLString: String = ""
     @State private var ollamaTestResult: OllamaTestResult = .untested
     @State private var ollamaTesting: Bool = false
@@ -65,12 +68,19 @@ private struct EngineSettingsView: View {
                     if let match = env.transcriptionEngines.first(where: { type(of: $0).kind == kind }) {
                         env.activeTranscriptionEngine = match
                     }
+                    models = []
+                    Task { await loadModels() }
                 }
 
-                TextField("Default model", text: Binding(
-                    get: { env.selectedModelId },
-                    set: { env.selectedModelId = $0; UserDefaults.standard.set($0, forKey: "VibeMeetings.SelectedTranscriptionModelId") }
-                ))
+                if models.isEmpty {
+                    HStack { Spacer(); ProgressView().controlSize(.small); Spacer() }
+                } else {
+                    ForEach(models) { m in modelRow(m) }
+                }
+
+                if let err = downloadError {
+                    Text(err).font(.caption).foregroundStyle(.red)
+                }
             }
 
             Section {
@@ -106,9 +116,84 @@ private struct EngineSettingsView: View {
             }
         }
         .padding()
-        .onAppear {
+        .task {
             engineKind = type(of: env.activeTranscriptionEngine).kind
             ollamaURLString = env.ollamaBaseURL.absoluteString
+            await loadModels()
+        }
+    }
+
+    // MARK: - Model picker
+
+    @ViewBuilder
+    private func modelRow(_ m: TranscriptionModelInfo) -> some View {
+        HStack(spacing: 10) {
+            Image(systemName: env.selectedModelId == m.id ? "checkmark.circle.fill" : "circle")
+                .foregroundStyle(env.selectedModelId == m.id ? Color.accentColor : .secondary)
+
+            VStack(alignment: .leading, spacing: 2) {
+                HStack(spacing: 6) {
+                    Text(m.displayName)
+                    if m.recommended {
+                        Text("recommended")
+                            .font(.caption2)
+                            .padding(.horizontal, 5).padding(.vertical, 2)
+                            .background(.blue.opacity(0.12))
+                            .foregroundStyle(.blue)
+                            .clipShape(.capsule)
+                    }
+                }
+                Text(ByteCountFormatter.string(fromByteCount: m.sizeBytes, countStyle: .file))
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+
+            Spacer()
+
+            if downloadingID == m.id {
+                ProgressView().controlSize(.small)
+                    .frame(width: 60)
+            } else if m.isDownloaded {
+                if env.selectedModelId == m.id {
+                    Text("Active")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                } else {
+                    Button("Use") { selectModel(m.id) }
+                        .buttonStyle(.borderless)
+                }
+            } else {
+                Button("Download") { Task { await downloadModel(m.id) } }
+                    .disabled(downloadingID != nil)
+            }
+        }
+        .contentShape(Rectangle())
+        .onTapGesture { if m.isDownloaded { selectModel(m.id) } }
+    }
+
+    private func selectModel(_ id: String) {
+        env.selectedModelId = id
+        UserDefaults.standard.set(id, forKey: "VibeMeetings.SelectedTranscriptionModelId")
+    }
+
+    private func loadModels() async {
+        models = (try? await env.activeTranscriptionEngine.availableModels()) ?? []
+    }
+
+    private func downloadModel(_ id: String) async {
+        downloadingID = id
+        downloadError = nil
+        defer { downloadingID = nil }
+        do {
+            try await env.activeTranscriptionEngine.loadModel(id: id) { _ in }
+            await loadModels()
+            // Auto-select if the user doesn't have a working model yet.
+            let downloaded = models.filter(\.isDownloaded)
+            if !downloaded.contains(where: { $0.id == env.selectedModelId }) {
+                selectModel(id)
+            }
+        } catch {
+            downloadError = error.localizedDescription
         }
     }
 
