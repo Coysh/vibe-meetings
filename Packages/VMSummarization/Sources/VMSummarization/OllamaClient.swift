@@ -1,16 +1,20 @@
 import Foundation
 import VMCore
 
-public final class OllamaClient: @unchecked Sendable {
-    public let baseURL: URL
+/// Internal HTTP client for Ollama. The public surface of this package is
+/// `OllamaEngine`; this client is an implementation detail and stays
+/// internal so the request/response types in `OllamaTypes.swift` don't
+/// need to be public.
+final class OllamaClient: @unchecked Sendable {
+    let baseURL: URL
     private let session: URLSession
 
-    public init(baseURL: URL = URL(string: "http://127.0.0.1:11434")!) {
+    init(baseURL: URL = URL(string: "http://127.0.0.1:11434")!) {
         self.baseURL = baseURL
         self.session = LocalhostOnlySession.loopbackOnly(timeout: 10)
     }
 
-    public func version() async -> EngineHealth {
+    func version() async -> EngineHealth {
         do {
             let (data, response) = try await session.data(from: baseURL.appendingPathComponent("api/version"))
             guard let http = response as? HTTPURLResponse, http.statusCode == 200 else {
@@ -25,12 +29,12 @@ public final class OllamaClient: @unchecked Sendable {
         }
     }
 
-    public func listModels() async throws -> [OllamaTagEntry] {
+    func listModels() async throws -> [OllamaTagEntry] {
         let (data, _) = try await session.data(from: baseURL.appendingPathComponent("api/tags"))
         return try JSONDecoder().decode(OllamaTagsResponse.self, from: data).models
     }
 
-    public func show(name: String) async throws -> OllamaShowResponse {
+    func show(name: String) async throws -> OllamaShowResponse {
         var req = URLRequest(url: baseURL.appendingPathComponent("api/show"))
         req.httpMethod = "POST"
         req.setValue("application/json", forHTTPHeaderField: "Content-Type")
@@ -40,7 +44,7 @@ public final class OllamaClient: @unchecked Sendable {
     }
 
     /// Streams chat response chunks (one decoded `OllamaChatStreamChunk` per emitted line).
-    public func streamChat(_ request: OllamaChatRequest) -> AsyncThrowingStream<OllamaChatStreamChunk, Error> {
+    func streamChat(_ request: OllamaChatRequest) -> AsyncThrowingStream<OllamaChatStreamChunk, Error> {
         AsyncThrowingStream { continuation in
             let task = Task {
                 do {
