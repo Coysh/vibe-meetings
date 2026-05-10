@@ -42,8 +42,17 @@ public actor EventKitCalendarService: CalendarService {
     private let preferences: CalendarPreferences
     private nonisolated let eventsContinuation: AsyncStream<[CalendarEvent]>.Continuation
     public nonisolated let events: AsyncStream<[CalendarEvent]>
-    private var observerToken: NSObjectProtocol?
-    private var pollingTask: Task<Void, Never>?
+
+    // Both are written exactly once from `startObserving` (which runs inside
+    // the actor) and read exactly once from `deinit`. Marked
+    // `nonisolated(unsafe)` so the deinit — which is implicitly nonisolated
+    // and cannot touch isolated stored properties of non-Sendable type —
+    // can still tear down the NotificationCenter observer and the polling
+    // task. The observer block also captures `[weak self]`, so even if this
+    // teardown were skipped the residual callback would be a no-op once the
+    // actor is deallocated.
+    private nonisolated(unsafe) var observerToken: NSObjectProtocol?
+    private nonisolated(unsafe) var pollingTask: Task<Void, Never>?
 
     public init(preferences: CalendarPreferences = .shared) {
         self.preferences = preferences
