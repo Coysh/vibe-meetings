@@ -63,7 +63,7 @@ struct FolderTreeView: View {
                     switch target {
                     case .folder(let node):
                         try? await env.meetingStore.renameFolder(node, to: newName)
-                    case .meeting(let id):
+                    case .meeting(let id, _):
                         try? await env.meetingStore.renameMeeting(id: id, to: newName)
                     }
                     renameTarget = nil
