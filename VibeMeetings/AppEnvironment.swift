@@ -59,6 +59,7 @@ final class AppEnvironment {
         let homeDir = FileManager.default.homeDirectoryForCurrentUser
         let defaultRoot = homeDir.appendingPathComponent("MeetingNotes")
 
+        let resolvedRoot: URL
         if let bookmark = defaults.data(forKey: rootKey) {
             var stale = false
             if let resolved = try? URL(
@@ -67,15 +68,16 @@ final class AppEnvironment {
                 relativeTo: nil,
                 bookmarkDataIsStale: &stale
             ) {
-                self.rootURL = resolved
+                resolvedRoot = resolved
             } else {
-                self.rootURL = defaultRoot
+                resolvedRoot = defaultRoot
             }
         } else {
-            self.rootURL = defaultRoot
+            resolvedRoot = defaultRoot
         }
 
-        self.meetingStore = try FilesystemMeetingStore(rootURL: self.rootURL)
+        self.rootURL = resolvedRoot
+        self.meetingStore = try FilesystemMeetingStore(rootURL: resolvedRoot)
 
         let whisperKit = WhisperKitEngine()
         let whisperCpp = WhisperCppEngine()
