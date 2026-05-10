@@ -107,6 +107,9 @@ final class RecordingController {
             try? FolderTreeScanner.writeMeeting(updated, to: MeetingFolder(url: handle.folderURL).metadataURL)
         }
         state = .idle
+        if env.activeRecordingController === self {
+            env.activeRecordingController = nil
+        }
         return result
     }
 }

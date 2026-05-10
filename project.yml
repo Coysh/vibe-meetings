@@ -28,6 +28,8 @@ packages:
     path: Packages/VMSummarization
   VMStorage:
     path: Packages/VMStorage
+  VMCalendar:
+    path: Packages/VMCalendar
 
 targets:
   VibeMeetings:
@@ -57,3 +59,4 @@ targets:
       - package: VMTranscription
       - package: VMSummarization
       - package: VMStorage
+      - package: VMCalendar

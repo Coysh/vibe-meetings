@@ -5,6 +5,7 @@ import VMRecording
 import VMStorage
 import VMTranscription
 import VMSummarization
+import VMCalendar
 
 /// Process-wide DI container. Held as a `@StateObject`-equivalent (here `@State`) on
 /// `VibeMeetingsApp` and injected into views via `@Environment`.
@@ -16,6 +17,14 @@ final class AppEnvironment {
     var transcriptionEngines: [any TranscriptionEngine]
     var activeTranscriptionEngine: any TranscriptionEngine
     var summarizationEngine: any SummarizationEngine
+    let calendarService: any CalendarService
+    let bannerCoordinator: BannerCoordinator
+
+    /// The current in-progress recording, if any. Set by `RootView` when a
+    /// meeting starts; cleared when the user stops. Drives the banner's
+    /// "don't suggest while already recording" rule and is the single source
+    /// of truth for whether a recording is live.
+    var activeRecordingController: RecordingController?
 
     /// Selected default model id (`whisper-medium` per plan).
     var selectedModelId: String
@@ -67,6 +76,10 @@ final class AppEnvironment {
         self.selectedOllamaModelId = defaults.string(forKey: ollamaModelKey) ?? "llama3.1:8b-instruct-q4_K_M"
 
         self.summarizationEngine = OllamaEngine(promptBundle: .main)
+
+        let cal = EventKitCalendarService()
+        self.calendarService = cal
+        self.bannerCoordinator = BannerCoordinator(calendar: cal)
     }
 
     func setRoot(_ url: URL) throws {

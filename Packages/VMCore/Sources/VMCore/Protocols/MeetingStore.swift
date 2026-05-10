@@ -60,6 +60,9 @@ public struct MeetingDraft: Sendable {
     public var modelId: String
     public var language: String?
     public var sourceKind: SourceKind
+    public var calendarEventID: String?
+    public var calendarSeriesID: String?
+    public var meetingPlatform: MeetingPlatform?
 
     public init(
         title: String,
@@ -68,7 +71,10 @@ public struct MeetingDraft: Sendable {
         summarizationEngine: EngineRef? = nil,
         modelId: String,
         language: String? = nil,
-        sourceKind: SourceKind = .liveRecording
+        sourceKind: SourceKind = .liveRecording,
+        calendarEventID: String? = nil,
+        calendarSeriesID: String? = nil,
+        meetingPlatform: MeetingPlatform? = nil
     ) {
         self.title = title
         self.startedAt = startedAt
@@ -77,6 +83,9 @@ public struct MeetingDraft: Sendable {
         self.modelId = modelId
         self.language = language
         self.sourceKind = sourceKind
+        self.calendarEventID = calendarEventID
+        self.calendarSeriesID = calendarSeriesID
+        self.meetingPlatform = meetingPlatform
     }
 }
 
@@ -98,6 +107,12 @@ public protocol MeetingStore: Sendable {
     func createFolder(at parent: FolderNode, name: String) async throws -> FolderNode
     func renameFolder(_ folder: FolderNode, to name: String) async throws
     func deleteFolder(_ folder: FolderNode) async throws
+
+    /// Looks up the parent folder of any meeting whose `calendarSeriesID`
+    /// matches. Used by the new-meeting flow to route recurring occurrences
+    /// into the same parent folder as their previous occurrence.
+    /// Returns nil if no meeting in the tree records that series ID.
+    func folderForSeries(_ seriesID: String) async -> FolderNode?
 
     func appendSegments(_ segs: [TranscriptSegment], to id: UUID) async throws
     func replaceTranscript(_ segs: [TranscriptSegment], for id: UUID) async throws

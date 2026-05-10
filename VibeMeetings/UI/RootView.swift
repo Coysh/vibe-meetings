@@ -8,7 +8,7 @@ struct RootView: View {
     @State private var selectedMeetingID: UUID?
     @State private var rootNode: FolderNode?
     @State private var newMeetingSheet = false
-    @State private var recordingController: RecordingController?
+    @State private var preselectedEventID: String?
 
     var body: some View {
         NavigationSplitView {
@@ -21,7 +21,7 @@ struct RootView: View {
             .frame(minWidth: 240)
         } detail: {
             VStack(spacing: 0) {
-                if let controller = recordingController {
+                if let controller = env.activeRecordingController {
                     RecordingBarView(controller: controller)
                     Divider()
                 }
@@ -34,8 +34,25 @@ struct RootView: View {
                     }
                 }
             }
+            .safeAreaInset(edge: .top) {
+                if let ev = env.bannerCoordinator.currentSuggestion {
+                    SuggestionBanner(
+                        event: ev,
+                        onStart: {
+                            preselectedEventID = ev.id
+                            newMeetingSheet = true
+                        },
+                        onDismiss: { env.bannerCoordinator.dismiss(ev) }
+                    )
+                }
+            }
         }
         .task {
+            let env = self.env
+            env.bannerCoordinator.setIsRecordingProvider {
+                env.activeRecordingController?.state == .recording
+            }
+            env.bannerCoordinator.start()
             for await tree in env.meetingStore.tree {
                 rootNode = tree
             }
@@ -45,12 +62,12 @@ struct RootView: View {
                 PrivacyBadgeView()
             }
         }
-        .sheet(isPresented: $newMeetingSheet) {
+        .sheet(isPresented: $newMeetingSheet, onDismiss: { preselectedEventID = nil }) {
             if let parent = selectedFolder ?? rootNode {
-                NewMeetingSheet(parentFolder: parent) { handle in
+                NewMeetingSheet(parentFolder: parent, preselectedEventID: preselectedEventID) { handle in
                     selectedMeetingID = handle.meeting.id
                     let c = RecordingController(env: env)
-                    recordingController = c
+                    env.activeRecordingController = c
                     Task { await c.start(handle: handle) }
                 }
             }

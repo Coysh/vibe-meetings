@@ -6,6 +6,7 @@ public actor FilesystemMeetingStore: MeetingStore {
 
     private var cachedTree: FolderNode
     private var meetingIndex: [UUID: URL] = [:]
+    private var seriesIndex: [String: URL] = [:]   // calendarSeriesID → parent folder URL
     private var watcher: FolderWatcher?
     private var subscribers: [UUID: AsyncStream<FolderNode>.Continuation] = [:]
 
@@ -17,6 +18,7 @@ public actor FilesystemMeetingStore: MeetingStore {
         self.rootURL = rootURL
         self.cachedTree = FolderTreeScanner.scan(root: rootURL)
         self.meetingIndex = FolderTreeScanner.indexMeetings(in: self.cachedTree)
+        self.seriesIndex = FolderTreeScanner.indexSeries(in: self.cachedTree)
         Task { await self.startWatching() }
     }
 
@@ -52,7 +54,21 @@ public actor FilesystemMeetingStore: MeetingStore {
     private func refreshFromDisk() {
         cachedTree = FolderTreeScanner.scan(root: rootURL)
         meetingIndex = FolderTreeScanner.indexMeetings(in: cachedTree)
+        seriesIndex = FolderTreeScanner.indexSeries(in: cachedTree)
         for (_, c) in subscribers { c.yield(cachedTree) }
+    }
+
+    public func folderForSeries(_ seriesID: String) async -> FolderNode? {
+        guard let url = seriesIndex[seriesID] else { return nil }
+        return findNode(at: url, in: cachedTree)
+    }
+
+    private func findNode(at url: URL, in node: FolderNode) -> FolderNode? {
+        if node.url.standardizedFileURL == url.standardizedFileURL { return node }
+        for child in node.children {
+            if let hit = findNode(at: url, in: child) { return hit }
+        }
+        return nil
     }
 
     private func broadcast() { refreshFromDisk() }
@@ -73,7 +89,11 @@ public actor FilesystemMeetingStore: MeetingStore {
             summarizationEngine: draft.summarizationEngine,
             modelId: draft.modelId,
             language: draft.language,
-            sourceKind: draft.sourceKind
+            sourceKind: draft.sourceKind,
+            calendarEventID: draft.calendarEventID,
+            calendarSeriesID: draft.calendarSeriesID,
+            meetingPlatform: draft.meetingPlatform,
+            calendarTitle: draft.calendarSeriesID != nil ? draft.title : nil
         )
 
         try AtomicWriter.createDirectory(at: meetingURL) { tmp in

@@ -8,9 +8,10 @@ struct SettingsView: View {
         TabView {
             GeneralSettingsView().tabItem { Label("General", systemImage: "gear") }
             EngineSettingsView().tabItem { Label("Engines", systemImage: "cpu") }
+            CalendarSettingsView().tabItem { Label("Calendar", systemImage: "calendar") }
             PrivacySettingsView().tabItem { Label("Privacy", systemImage: "lock.shield") }
         }
-        .frame(width: 520, height: 420)
+        .frame(width: 520, height: 480)
     }
 }
 

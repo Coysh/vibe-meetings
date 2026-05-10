@@ -37,7 +37,14 @@ public struct Meeting: Codable, Identifiable, Hashable, Sendable {
     public var sourceKind: SourceKind
     public var schemaVersion: Int
 
-    public static let currentSchemaVersion = 1
+    // Schema v2 (2026-05): calendar integration. All optional → v1 files
+    // decode unchanged and are upgraded lazily on next write.
+    public var calendarEventID: String?         // EKEvent.eventIdentifier — per-occurrence
+    public var calendarSeriesID: String?        // calendarItemExternalIdentifier — stable per series
+    public var meetingPlatform: MeetingPlatform?
+    public var calendarTitle: String?           // event title at creation; preserved if user renames the meeting
+
+    public static let currentSchemaVersion = 2
 
     public init(
         id: UUID = UUID(),
@@ -54,7 +61,11 @@ public struct Meeting: Codable, Identifiable, Hashable, Sendable {
         participants: [Speaker] = [.you, .others],
         tags: [String] = [],
         sourceKind: SourceKind = .liveRecording,
-        schemaVersion: Int = Meeting.currentSchemaVersion
+        schemaVersion: Int = Meeting.currentSchemaVersion,
+        calendarEventID: String? = nil,
+        calendarSeriesID: String? = nil,
+        meetingPlatform: MeetingPlatform? = nil,
+        calendarTitle: String? = nil
     ) {
         self.id = id
         self.title = title
@@ -71,6 +82,10 @@ public struct Meeting: Codable, Identifiable, Hashable, Sendable {
         self.tags = tags
         self.sourceKind = sourceKind
         self.schemaVersion = schemaVersion
+        self.calendarEventID = calendarEventID
+        self.calendarSeriesID = calendarSeriesID
+        self.meetingPlatform = meetingPlatform
+        self.calendarTitle = calendarTitle
     }
 
     public var duration: TimeInterval? {

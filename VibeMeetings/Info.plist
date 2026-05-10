@@ -28,6 +28,10 @@
     <string>vibe-meetings records your microphone so it can transcribe what you say. Audio never leaves your Mac.</string>
     <key>NSAudioCaptureUsageDescription</key>
     <string>vibe-meetings captures system audio (the other side of the call) so it can transcribe what others say. Audio never leaves your Mac.</string>
+    <key>NSCalendarsUsageDescription</key>
+    <string>vibe-meetings reads your calendar to detect Teams meetings and offer to start recording them. Calendar data never leaves your Mac.</string>
+    <key>NSCalendarsFullAccessUsageDescription</key>
+    <string>vibe-meetings reads your calendar to detect Teams meetings and offer to start recording them. Calendar data never leaves your Mac.</string>
     <key>NSHumanReadableCopyright</key>
     <string>© 2026</string>
 </dict>
