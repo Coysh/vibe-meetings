@@ -1,5 +1,6 @@
 import SwiftUI
 import VMCore
+import VMRecording
 import VMSummarization
 
 struct SettingsView: View {
@@ -18,6 +19,15 @@ struct SettingsView: View {
 
 private struct GeneralSettingsView: View {
     @Environment(AppEnvironment.self) private var env
+    @State private var inputDevices: [AudioInputDevice] = AudioDeviceEnumerator.inputDevices()
+
+    /// Binding that maps `nil` (system default) ↔ empty string for the Picker.
+    private var micSelection: Binding<String> {
+        Binding(
+            get: { env.selectedMicDeviceUID ?? "" },
+            set: { env.setMicDevice(uid: $0.isEmpty ? nil : $0) }
+        )
+    }
 
     var body: some View {
         Form {
@@ -35,6 +45,21 @@ private struct GeneralSettingsView: View {
                     }
                 }
             }
+
+            Picker("Microphone", selection: micSelection) {
+                Text("System Default").tag("")
+                ForEach(inputDevices) { device in
+                    Text(device.name + (device.isDefault ? " (Default)" : ""))
+                        .tag(device.uid)
+                }
+            }
+
+            if let uid = env.selectedMicDeviceUID,
+               !inputDevices.contains(where: { $0.uid == uid }) {
+                Label("Selected microphone is not currently connected.", systemImage: "exclamationmark.triangle")
+                    .font(.caption)
+                    .foregroundStyle(.orange)
+            }
         }
         .padding()
     }
@@ -49,6 +74,11 @@ private struct EngineSettingsView: View {
     @State private var ollamaURLString: String = ""
     @State private var ollamaTestResult: OllamaTestResult = .untested
     @State private var ollamaTesting: Bool = false
+    @State private var openAIKey: String = ""
+    @State private var openAIModel: String = ""
+    @State private var openAIModels: [SummarizationModelInfo] = []
+    @State private var openAITestResult: String? = nil
+    @State private var openAITesting: Bool = false
 
     enum OllamaTestResult: Equatable {
         case untested
@@ -114,12 +144,73 @@ private struct EngineSettingsView: View {
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }
+
+            Section {
+                Picker("Summary engine", selection: Binding(
+                    get: { env.activeSummarizationKind },
+                    set: { kind in
+                        if kind == "openai" && !openAIKey.isEmpty {
+                            env.setOpenAI(apiKey: openAIKey, modelId: openAIModel.isEmpty ? "gpt-4o-mini" : openAIModel)
+                        } else {
+                            env.setOllamaAsSummarizer()
+                        }
+                    }
+                )) {
+                    Text("Ollama (local)").tag("ollama")
+                    Text("OpenAI").tag("openai")
+                }
+
+                SecureField("API Key", text: $openAIKey, prompt: Text("sk-..."))
+                    .textFieldStyle(.roundedBorder)
+
+                HStack {
+                    Button("Test & Save") {
+                        Task { await testAndSaveOpenAI() }
+                    }
+                    .disabled(openAITesting || openAIKey.isEmpty)
+                    .buttonStyle(.borderedProminent)
+
+                    if openAITesting { ProgressView().controlSize(.small) }
+                    Spacer()
+                }
+
+                if let result = openAITestResult {
+                    Label(result, systemImage: result.contains("OK") ? "checkmark.circle.fill" : "xmark.circle.fill")
+                        .font(.caption)
+                        .foregroundStyle(result.contains("OK") ? .green : .red)
+                }
+
+                if !openAIModels.isEmpty {
+                    Picker("Model", selection: $openAIModel) {
+                        ForEach(openAIModels) { m in
+                            Text(m.displayName).tag(m.id)
+                        }
+                    }
+                    .onChange(of: openAIModel) { _, newModel in
+                        if env.activeSummarizationKind == "openai" && !openAIKey.isEmpty {
+                            env.setOpenAI(apiKey: openAIKey, modelId: newModel)
+                        }
+                    }
+                } else if env.activeSummarizationKind == "openai" {
+                    TextField("Model", text: $openAIModel, prompt: Text("gpt-4o-mini"))
+                        .textFieldStyle(.roundedBorder)
+                }
+            } header: {
+                Text("OpenAI (summaries)")
+            } footer: {
+                Text("Your API key is stored locally. Transcripts are sent to OpenAI's API for summarization when this engine is active.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
         }
         .padding()
         .task {
             engineKind = type(of: env.activeTranscriptionEngine).kind
             ollamaURLString = env.ollamaBaseURL.absoluteString
+            openAIKey = env.openAIApiKey
+            openAIModel = env.selectedOpenAIModelId
             await loadModels()
+            if !openAIKey.isEmpty { await loadOpenAIModels() }
         }
     }
 
@@ -259,6 +350,36 @@ private struct EngineSettingsView: View {
         env.setOllamaBaseURL(url)
         ollamaTestResult = .untested
     }
+
+    // MARK: - OpenAI
+
+    private func testAndSaveOpenAI() async {
+        openAITesting = true
+        openAITestResult = nil
+        defer { openAITesting = false }
+
+        let engine = OpenAIEngine(apiKey: openAIKey, promptBundle: .main)
+        let health = await engine.isAvailable()
+        switch health {
+        case .ok:
+            openAITestResult = "OK — connected to OpenAI"
+            env.setOpenAI(apiKey: openAIKey, modelId: openAIModel.isEmpty ? "gpt-4o-mini" : openAIModel)
+            await loadOpenAIModels()
+        case .unreachable(let reason):
+            openAITestResult = reason
+        default:
+            openAITestResult = "Connection failed"
+        }
+    }
+
+    private func loadOpenAIModels() async {
+        let engine = OpenAIEngine(apiKey: openAIKey, promptBundle: .main)
+        openAIModels = (try? await engine.availableModels()) ?? []
+        if !openAIModels.isEmpty && openAIModel.isEmpty {
+            openAIModel = openAIModels.first(where: { $0.id.contains("gpt-4o-mini") })?.id
+                          ?? openAIModels.first?.id ?? "gpt-4o-mini"
+        }
+    }
 }
 
 private struct PrivacySettingsView: View {
@@ -272,6 +393,9 @@ private struct PrivacySettingsView: View {
                     .font(.headline)
             case .lan(let host):
                 Label("Audio + transcripts stay on this Mac. Summaries are generated by your LAN Ollama at \(host).", systemImage: "wifi.circle.fill")
+                    .font(.headline)
+            case .cloud(let provider):
+                Label("Audio + transcripts stay on this Mac. Summaries are sent to \(provider) for processing.", systemImage: "cloud.fill")
                     .font(.headline)
             }
 

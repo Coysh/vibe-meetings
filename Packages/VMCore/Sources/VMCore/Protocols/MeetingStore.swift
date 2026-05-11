@@ -117,8 +117,10 @@ public protocol MeetingStore: Sendable {
     func appendSegments(_ segs: [TranscriptSegment], to id: UUID) async throws
     func replaceTranscript(_ segs: [TranscriptSegment], for id: UUID) async throws
     func writeSummary(_ markdown: String, for id: UUID) async throws
+    func writeNotes(_ text: String, for id: UUID) async throws
     func loadTranscript(for id: UUID) async throws -> [TranscriptSegment]
     func loadSummary(for id: UUID) async throws -> String?
+    func loadNotes(for id: UUID) async throws -> String?
 }
 
 public enum MeetingStoreError: Error, Sendable, Equatable {

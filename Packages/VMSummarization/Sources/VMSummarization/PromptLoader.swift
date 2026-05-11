@@ -32,19 +32,34 @@ Produce Markdown with these sections in order, omitting any that are empty:
 4. ## Open questions — bullets.
 
 Rules:
-- Only use facts present in the transcript. If unclear, write "unspecified".
+- Only use facts present in the transcript (and user notes, if provided). If unclear, write "unspecified".
+- If the user provided their own notes at the end of the transcript, incorporate them: they may clarify decisions, add context, or highlight things the transcription missed.
 - Do not include preamble, apologies, or restatements of these instructions.
 - Output Markdown only, no code fences around the whole document.
 """
 
     /// Renders a transcript as the user message: speaker-labelled blocks with timestamps,
     /// matching the body of `transcript.md` (no front-matter).
-    public static func renderTranscript(_ segments: [TranscriptSegment], speakerNames: [String: String]) -> String {
+    /// If `userNotes` is non-empty, it is appended after the transcript so the LLM
+    /// can incorporate the user's own notes into the summary.
+    public static func renderTranscript(
+        _ segments: [TranscriptSegment],
+        speakerNames: [String: String],
+        userNotes: String? = nil
+    ) -> String {
         var out = ""
-        for seg in segments where !seg.isPartial {
+        for seg in segments {
             let name = speakerNames[seg.speakerId] ?? seg.speakerId.capitalized
+            let text = seg.text.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !text.isEmpty else { continue }
             out += "**[\(seg.start.formattedTimestamp)] \(name)**\n"
-            out += "\(seg.text.trimmingCharacters(in: .whitespacesAndNewlines))\n\n"
+            out += "\(text)\n\n"
+        }
+        if let notes = userNotes?.trimmingCharacters(in: .whitespacesAndNewlines),
+           !notes.isEmpty {
+            out += "---\n\n"
+            out += "## User's own notes\n\n"
+            out += notes + "\n"
         }
         return out
     }

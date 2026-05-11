@@ -36,6 +36,20 @@ public enum FolderTreeScanner {
             children.append(scanDirectory(at: entry))
         }
 
+        // Sort: meetings by startedAt (newest first), folders alphabetically.
+        children.sort { a, b in
+            switch (a.meeting, b.meeting) {
+            case (.some(let ma), .some(let mb)):
+                return ma.startedAt > mb.startedAt
+            case (.some, .none):
+                return false  // folders before meetings
+            case (.none, .some):
+                return true
+            case (.none, .none):
+                return a.name.localizedStandardCompare(b.name) == .orderedAscending
+            }
+        }
+
         return FolderNode(
             url: url,
             name: url.lastPathComponent,

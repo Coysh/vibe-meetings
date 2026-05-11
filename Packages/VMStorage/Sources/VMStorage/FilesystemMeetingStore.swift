@@ -231,6 +231,19 @@ public actor FilesystemMeetingStore: MeetingStore {
         return try String(contentsOf: summaryURL, encoding: .utf8)
     }
 
+    public func writeNotes(_ text: String, for id: UUID) async throws {
+        guard let url = meetingIndex[id] else { throw MeetingStoreError.meetingNotFound(id) }
+        let mf = MeetingFolder(url: url)
+        try AtomicWriter.write(Data(text.utf8), to: mf.notesURL)
+    }
+
+    public func loadNotes(for id: UUID) async throws -> String? {
+        guard let url = meetingIndex[id] else { throw MeetingStoreError.meetingNotFound(id) }
+        let notesURL = MeetingFolder(url: url).notesURL
+        guard FileManager.default.fileExists(atPath: notesURL.path) else { return nil }
+        return try String(contentsOf: notesURL, encoding: .utf8)
+    }
+
     // MARK: - helpers
 
     private func makeHandle(meeting: Meeting, folderURL: URL) -> MeetingHandle {

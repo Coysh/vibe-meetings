@@ -35,7 +35,7 @@ public final class WhisperCppEngine: TranscriptionEngine, @unchecked Sendable {
         }
     }
 
-    public func loadModel(id: String, progress: @Sendable (Double) -> Void) async throws {
+    public func loadModel(id: String, progress: @escaping @Sendable (Double) -> Void) async throws {
         throw TranscriptionEngineError.engineUnavailable(
             reason: "whisper.cpp C bridge not yet vendored — see Packages/VMTranscription/WhisperCppBridge/README.md"
         )

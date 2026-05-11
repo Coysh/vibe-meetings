@@ -1,0 +1,595 @@
+// !$*UTF8*$!
+{
+	archiveVersion = 1;
+	classes = {
+	};
+	objectVersion = 77;
+	objects = {
+
+/* Begin PBXBuildFile section */
+		0A4048BC3077756B43E64C5C /* CalendarAccessView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2A305B071F58C239C8FFEC71 /* CalendarAccessView.swift */; };
+		1ACD1614D2868F7F656CC41C /* RecordingBarView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 148AAE13D07C30E6D0A2A196 /* RecordingBarView.swift */; };
+		27C8BA7B47646DDDCDECFD33 /* VMTranscription in Frameworks */ = {isa = PBXBuildFile; productRef = 92C921174A047821FC67EA38 /* VMTranscription */; };
+		2B328E480C6222351A847A2D /* FolderTreeView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 85E5BAD8B193EF9205A95ED7 /* FolderTreeView.swift */; };
+		2DFACC0EBC269755DAC6E048 /* CalendarSettingsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4757B8F5683B1C700A160B7E /* CalendarSettingsView.swift */; };
+		2F4D17A0DE4399141F81DA25 /* summary.system.md in Resources */ = {isa = PBXBuildFile; fileRef = 51363BA47624D8F309024000 /* summary.system.md */; };
+		33FFE4F5B4CA492FAF04C343 /* SuggestionBanner.swift in Sources */ = {isa = PBXBuildFile; fileRef = EAEF86E1A60C4514C0ADB2BF /* SuggestionBanner.swift */; };
+		3A6AF8EABE44CB002FB13860 /* TranscriptView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 383C34E75274AB27C5FEEB40 /* TranscriptView.swift */; };
+		3CD5B0718CDC4F204DD82E01 /* SidebarSelection.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA8E30477A5ADD9245C136DF /* SidebarSelection.swift */; };
+		44A4AA8E64F0A725BD316DD3 /* VMSummarization in Frameworks */ = {isa = PBXBuildFile; productRef = BAB8D0F0146E77D5FB61E695 /* VMSummarization */; };
+		4712172DDB64E37CEF645D4F /* Preview Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = 6B5A1FA575AB0E4168A5605C /* Preview Assets.xcassets */; };
+		4DFF5E1860DA6ED91537024A /* SettingsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7F03C68772C3A761B5F27E12 /* SettingsView.swift */; };
+		4FE233302FB20C8E006F29C4 /* MicActiveBanner.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4FE2332F2FB20C8D006F29C4 /* MicActiveBanner.swift */; };
+		4FE233322FB20C94006F29C4 /* MeetingEndBanner.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4FE233312FB20C94006F29C4 /* MeetingEndBanner.swift */; };
+		5B07BADDE5CEF68FC35314DF /* action_items.system.md in Resources */ = {isa = PBXBuildFile; fileRef = 7EA62E384045395DD13967F1 /* action_items.system.md */; };
+		655737F486FFA44CD6422CD7 /* BannerCoordinator.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3CF900D4A92FEED161ADB88F /* BannerCoordinator.swift */; };
+		676EB16AF871EDC219B9033D /* AppEnvironment.swift in Sources */ = {isa = PBXBuildFile; fileRef = 61ABE7DA1EBB9CB5CFE4071D /* AppEnvironment.swift */; };
+		6EBBBD06124AFCCADACF4757 /* ModelDownloadView.swift in Sources */ = {isa = PBXBuildFile; fileRef = BC78434CF36FAC9568F329C5 /* ModelDownloadView.swift */; };
+		736E0E963334AD6D9DC4014D /* OllamaCheckView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3118BBD953FAA85CF0032A13 /* OllamaCheckView.swift */; };
+		74F2FF7134CD5C61483BBF38 /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = CA5E41EF6A781F688F125BBF /* Assets.xcassets */; };
+		96E163FEDE0D952716940DF4 /* MeetingDetailView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 597BA1F2DE971B20609E2D46 /* MeetingDetailView.swift */; };
+		A63D96C7DC9EA5594BA04817 /* NewMeetingSheet.swift in Sources */ = {isa = PBXBuildFile; fileRef = CEC0B8DF95891510E676EC9F /* NewMeetingSheet.swift */; };
+		A79F118D33C0B907C807972B /* VMCore in Frameworks */ = {isa = PBXBuildFile; productRef = 88DB33C6801D1908FC092EAF /* VMCore */; };
+		AABC42507A708136FC60EACB /* VMRecording in Frameworks */ = {isa = PBXBuildFile; productRef = AEEE339098DAF67BE5D6073B /* VMRecording */; };
+		D2233B040A885F22FD2A2ACD /* AudioPlaybackView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5288619DADA1D5DC87A38FE4 /* AudioPlaybackView.swift */; };
+		D4EE6DA313935423C4F3FD92 /* VMStorage in Frameworks */ = {isa = PBXBuildFile; productRef = 99B4BD360F5F40E9ED80865F /* VMStorage */; };
+		D64043B5A83483AE80CD1626 /* SummaryView.swift in Sources */ = {isa = PBXBuildFile; fileRef = C3F92A977DE107A995153948 /* SummaryView.swift */; };
+		DAFBA525419AC3593E15C652 /* RootView.swift in Sources */ = {isa = PBXBuildFile; fileRef = E6C3B037EBD9FA1AF9E0A374 /* RootView.swift */; };
+		DE91E996433585F7D716E435 /* PermissionsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5D46462FAD39A3C94C95BF8F /* PermissionsView.swift */; };
+		E63F6D86F7598EE110BB9492 /* VMCalendar in Frameworks */ = {isa = PBXBuildFile; productRef = B3AC476BB41917B26FAFA9BE /* VMCalendar */; };
+		F480CC67A2DFAB5C5AA8A0CE /* VibeMeetingsApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = 90C3DE5D995DE8E9CD969C29 /* VibeMeetingsApp.swift */; };
+/* End PBXBuildFile section */
+
+/* Begin PBXFileReference section */
+		148AAE13D07C30E6D0A2A196 /* RecordingBarView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RecordingBarView.swift; sourceTree = "<group>"; };
+		2A305B071F58C239C8FFEC71 /* CalendarAccessView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CalendarAccessView.swift; sourceTree = "<group>"; };
+		3118BBD953FAA85CF0032A13 /* OllamaCheckView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OllamaCheckView.swift; sourceTree = "<group>"; };
+		358A142BAB239A6A417C3DC7 /* VMCalendar */ = {isa = PBXFileReference; lastKnownFileType = folder; name = VMCalendar; path = Packages/VMCalendar; sourceTree = SOURCE_ROOT; };
+		383C34E75274AB27C5FEEB40 /* TranscriptView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TranscriptView.swift; sourceTree = "<group>"; };
+		3C4975FDA5A94C341F815AFC /* VMTranscription */ = {isa = PBXFileReference; lastKnownFileType = folder; name = VMTranscription; path = Packages/VMTranscription; sourceTree = SOURCE_ROOT; };
+		3CF900D4A92FEED161ADB88F /* BannerCoordinator.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BannerCoordinator.swift; sourceTree = "<group>"; };
+		4757B8F5683B1C700A160B7E /* CalendarSettingsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CalendarSettingsView.swift; sourceTree = "<group>"; };
+		4FE2332F2FB20C8D006F29C4 /* MicActiveBanner.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MicActiveBanner.swift; sourceTree = "<group>"; };
+		4FE233312FB20C94006F29C4 /* MeetingEndBanner.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MeetingEndBanner.swift; sourceTree = "<group>"; };
+		51363BA47624D8F309024000 /* summary.system.md */ = {isa = PBXFileReference; lastKnownFileType = net.daringfireball.markdown; path = summary.system.md; sourceTree = "<group>"; };
+		517E4CDC8AC52F6A615E4F1D /* VMCore */ = {isa = PBXFileReference; lastKnownFileType = folder; name = VMCore; path = Packages/VMCore; sourceTree = SOURCE_ROOT; };
+		5288619DADA1D5DC87A38FE4 /* AudioPlaybackView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AudioPlaybackView.swift; sourceTree = "<group>"; };
+		597BA1F2DE971B20609E2D46 /* MeetingDetailView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MeetingDetailView.swift; sourceTree = "<group>"; };
+		5D46462FAD39A3C94C95BF8F /* PermissionsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PermissionsView.swift; sourceTree = "<group>"; };
+		61ABE7DA1EBB9CB5CFE4071D /* AppEnvironment.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppEnvironment.swift; sourceTree = "<group>"; };
+		6B5A1FA575AB0E4168A5605C /* Preview Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = "Preview Assets.xcassets"; sourceTree = "<group>"; };
+		789DF11442E4EEA0F916E857 /* VibeMeetings.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; name = VibeMeetings.app; path = "vibe-meetings.app"; sourceTree = BUILT_PRODUCTS_DIR; };
+		7EA62E384045395DD13967F1 /* action_items.system.md */ = {isa = PBXFileReference; lastKnownFileType = net.daringfireball.markdown; path = action_items.system.md; sourceTree = "<group>"; };
+		7F03C68772C3A761B5F27E12 /* SettingsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SettingsView.swift; sourceTree = "<group>"; };
+		82C78154FC66C3ECAF450714 /* VMStorage */ = {isa = PBXFileReference; lastKnownFileType = folder; name = VMStorage; path = Packages/VMStorage; sourceTree = SOURCE_ROOT; };
+		85E5BAD8B193EF9205A95ED7 /* FolderTreeView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FolderTreeView.swift; sourceTree = "<group>"; };
+		8A79DC76960090F879CE06A6 /* VMRecording */ = {isa = PBXFileReference; lastKnownFileType = folder; name = VMRecording; path = Packages/VMRecording; sourceTree = SOURCE_ROOT; };
+		90C3DE5D995DE8E9CD969C29 /* VibeMeetingsApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = VibeMeetingsApp.swift; sourceTree = "<group>"; };
+		AA8E30477A5ADD9245C136DF /* SidebarSelection.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SidebarSelection.swift; sourceTree = "<group>"; };
+		BC78434CF36FAC9568F329C5 /* ModelDownloadView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ModelDownloadView.swift; sourceTree = "<group>"; };
+		C3F92A977DE107A995153948 /* SummaryView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SummaryView.swift; sourceTree = "<group>"; };
+		CA5E41EF6A781F688F125BBF /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
+		CEC0B8DF95891510E676EC9F /* NewMeetingSheet.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NewMeetingSheet.swift; sourceTree = "<group>"; };
+		E6C3B037EBD9FA1AF9E0A374 /* RootView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RootView.swift; sourceTree = "<group>"; };
+		EAEF86E1A60C4514C0ADB2BF /* SuggestionBanner.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SuggestionBanner.swift; sourceTree = "<group>"; };
+		F4E9999254F7EC94F1894BCB /* VMSummarization */ = {isa = PBXFileReference; lastKnownFileType = folder; name = VMSummarization; path = Packages/VMSummarization; sourceTree = SOURCE_ROOT; };
+/* End PBXFileReference section */
+
+/* Begin PBXFrameworksBuildPhase section */
+		CB6AFFCA956C874584003798 /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				A79F118D33C0B907C807972B /* VMCore in Frameworks */,
+				AABC42507A708136FC60EACB /* VMRecording in Frameworks */,
+				27C8BA7B47646DDDCDECFD33 /* VMTranscription in Frameworks */,
+				44A4AA8E64F0A725BD316DD3 /* VMSummarization in Frameworks */,
+				D4EE6DA313935423C4F3FD92 /* VMStorage in Frameworks */,
+				E63F6D86F7598EE110BB9492 /* VMCalendar in Frameworks */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXFrameworksBuildPhase section */
+
+/* Begin PBXGroup section */
+		3D5504A1F13503170EF9CBB6 /* Recording */ = {
+			isa = PBXGroup;
+			children = (
+				3CF900D4A92FEED161ADB88F /* BannerCoordinator.swift */,
+				148AAE13D07C30E6D0A2A196 /* RecordingBarView.swift */,
+				EAEF86E1A60C4514C0ADB2BF /* SuggestionBanner.swift */,
+				4FE2332F2FB20C8D006F29C4 /* MicActiveBanner.swift */,
+				4FE233312FB20C94006F29C4 /* MeetingEndBanner.swift */,
+			);
+			path = Recording;
+			sourceTree = "<group>";
+		};
+		4C2D86A06D6389D0641AE072 /* Resources */ = {
+			isa = PBXGroup;
+			children = (
+				CD661BD9D92C80ADE89B699C /* Prompts */,
+			);
+			path = Resources;
+			sourceTree = "<group>";
+		};
+		76DAF097AB3E73F47F6238C5 /* Settings */ = {
+			isa = PBXGroup;
+			children = (
+				4757B8F5683B1C700A160B7E /* CalendarSettingsView.swift */,
+				7F03C68772C3A761B5F27E12 /* SettingsView.swift */,
+			);
+			path = Settings;
+			sourceTree = "<group>";
+		};
+		80833D21798A7C959431B740 /* Onboarding */ = {
+			isa = PBXGroup;
+			children = (
+				2A305B071F58C239C8FFEC71 /* CalendarAccessView.swift */,
+				BC78434CF36FAC9568F329C5 /* ModelDownloadView.swift */,
+				3118BBD953FAA85CF0032A13 /* OllamaCheckView.swift */,
+				5D46462FAD39A3C94C95BF8F /* PermissionsView.swift */,
+			);
+			path = Onboarding;
+			sourceTree = "<group>";
+		};
+		9D2C709ECDB571EC6DD74D53 /* UI */ = {
+			isa = PBXGroup;
+			children = (
+				E6C3B037EBD9FA1AF9E0A374 /* RootView.swift */,
+				9FE33051B3FBE9B5EEC7F655 /* Meeting */,
+				80833D21798A7C959431B740 /* Onboarding */,
+				3D5504A1F13503170EF9CBB6 /* Recording */,
+				76DAF097AB3E73F47F6238C5 /* Settings */,
+				D4649E9BCBBFF257DCFCB174 /* Sidebar */,
+			);
+			path = UI;
+			sourceTree = "<group>";
+		};
+		9FE33051B3FBE9B5EEC7F655 /* Meeting */ = {
+			isa = PBXGroup;
+			children = (
+				5288619DADA1D5DC87A38FE4 /* AudioPlaybackView.swift */,
+				597BA1F2DE971B20609E2D46 /* MeetingDetailView.swift */,
+				CEC0B8DF95891510E676EC9F /* NewMeetingSheet.swift */,
+				C3F92A977DE107A995153948 /* SummaryView.swift */,
+				383C34E75274AB27C5FEEB40 /* TranscriptView.swift */,
+			);
+			path = Meeting;
+			sourceTree = "<group>";
+		};
+		A728A027F3B0F5638628ABA1 /* Packages */ = {
+			isa = PBXGroup;
+			children = (
+				358A142BAB239A6A417C3DC7 /* VMCalendar */,
+				517E4CDC8AC52F6A615E4F1D /* VMCore */,
+				8A79DC76960090F879CE06A6 /* VMRecording */,
+				82C78154FC66C3ECAF450714 /* VMStorage */,
+				F4E9999254F7EC94F1894BCB /* VMSummarization */,
+				3C4975FDA5A94C341F815AFC /* VMTranscription */,
+			);
+			path = Packages;
+			sourceTree = "<group>";
+		};
+		A81AF7B10E393D7477246702 /* Preview Content */ = {
+			isa = PBXGroup;
+			children = (
+				6B5A1FA575AB0E4168A5605C /* Preview Assets.xcassets */,
+			);
+			path = "Preview Content";
+			sourceTree = "<group>";
+		};
+		CD661BD9D92C80ADE89B699C /* Prompts */ = {
+			isa = PBXGroup;
+			children = (
+				7EA62E384045395DD13967F1 /* action_items.system.md */,
+				51363BA47624D8F309024000 /* summary.system.md */,
+			);
+			path = Prompts;
+			sourceTree = "<group>";
+		};
+		D4649E9BCBBFF257DCFCB174 /* Sidebar */ = {
+			isa = PBXGroup;
+			children = (
+				85E5BAD8B193EF9205A95ED7 /* FolderTreeView.swift */,
+				AA8E30477A5ADD9245C136DF /* SidebarSelection.swift */,
+			);
+			path = Sidebar;
+			sourceTree = "<group>";
+		};
+		D71A406B17A5D68DB54D5306 /* Products */ = {
+			isa = PBXGroup;
+			children = (
+				789DF11442E4EEA0F916E857 /* VibeMeetings.app */,
+			);
+			name = Products;
+			sourceTree = "<group>";
+		};
+		E86811521C630080CAB1E24B = {
+			isa = PBXGroup;
+			children = (
+				A728A027F3B0F5638628ABA1 /* Packages */,
+				FF68F9260D5767AE0B778CBA /* VibeMeetings */,
+				D71A406B17A5D68DB54D5306 /* Products */,
+			);
+			sourceTree = "<group>";
+		};
+		FF68F9260D5767AE0B778CBA /* VibeMeetings */ = {
+			isa = PBXGroup;
+			children = (
+				61ABE7DA1EBB9CB5CFE4071D /* AppEnvironment.swift */,
+				CA5E41EF6A781F688F125BBF /* Assets.xcassets */,
+				90C3DE5D995DE8E9CD969C29 /* VibeMeetingsApp.swift */,
+				A81AF7B10E393D7477246702 /* Preview Content */,
+				4C2D86A06D6389D0641AE072 /* Resources */,
+				9D2C709ECDB571EC6DD74D53 /* UI */,
+			);
+			path = VibeMeetings;
+			sourceTree = "<group>";
+		};
+/* End PBXGroup section */
+
+/* Begin PBXNativeTarget section */
+		DDAC755F78FB955218A839F7 /* VibeMeetings */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = 5FF14CAC84BE87A36B74AE01 /* Build configuration list for PBXNativeTarget "VibeMeetings" */;
+			buildPhases = (
+				774EDCE3C03BEBED9D57C008 /* Sources */,
+				551606872477EDC7F2C6E41D /* Resources */,
+				CB6AFFCA956C874584003798 /* Frameworks */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+			);
+			name = VibeMeetings;
+			packageProductDependencies = (
+				88DB33C6801D1908FC092EAF /* VMCore */,
+				AEEE339098DAF67BE5D6073B /* VMRecording */,
+				92C921174A047821FC67EA38 /* VMTranscription */,
+				BAB8D0F0146E77D5FB61E695 /* VMSummarization */,
+				99B4BD360F5F40E9ED80865F /* VMStorage */,
+				B3AC476BB41917B26FAFA9BE /* VMCalendar */,
+			);
+			productName = VibeMeetings;
+			productReference = 789DF11442E4EEA0F916E857 /* VibeMeetings.app */;
+			productType = "com.apple.product-type.application";
+		};
+/* End PBXNativeTarget section */
+
+/* Begin PBXProject section */
+		BF19ACA9B04254FF347207ED /* Project object */ = {
+			isa = PBXProject;
+			attributes = {
+				BuildIndependentTargetsInParallel = YES;
+				LastUpgradeCheck = 1430;
+				TargetAttributes = {
+					DDAC755F78FB955218A839F7 = {
+						ProvisioningStyle = Automatic;
+					};
+				};
+			};
+			buildConfigurationList = C4DACC5795EBE4E20138F1A1 /* Build configuration list for PBXProject "VibeMeetings" */;
+			developmentRegion = en;
+			hasScannedForEncodings = 0;
+			knownRegions = (
+				Base,
+				en,
+			);
+			mainGroup = E86811521C630080CAB1E24B;
+			minimizedProjectReferenceProxies = 1;
+			packageReferences = (
+				D0318B290222D84F1A5786FA /* XCLocalSwiftPackageReference "Packages/VMCalendar" */,
+				430BD4BB2219276E32A0FDF7 /* XCLocalSwiftPackageReference "Packages/VMCore" */,
+				9234FFA763B6820CB6547A01 /* XCLocalSwiftPackageReference "Packages/VMRecording" */,
+				9AE82E42D744F56485581B33 /* XCLocalSwiftPackageReference "Packages/VMStorage" */,
+				933FBB087EEE2E7F850CC768 /* XCLocalSwiftPackageReference "Packages/VMSummarization" */,
+				AAA3B03BECFFAB865264E38D /* XCLocalSwiftPackageReference "Packages/VMTranscription" */,
+			);
+			preferredProjectObjectVersion = 77;
+			productRefGroup = D71A406B17A5D68DB54D5306 /* Products */;
+			projectDirPath = "";
+			projectRoot = "";
+			targets = (
+				DDAC755F78FB955218A839F7 /* VibeMeetings */,
+			);
+		};
+/* End PBXProject section */
+
+/* Begin PBXResourcesBuildPhase section */
+		551606872477EDC7F2C6E41D /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				74F2FF7134CD5C61483BBF38 /* Assets.xcassets in Resources */,
+				4712172DDB64E37CEF645D4F /* Preview Assets.xcassets in Resources */,
+				5B07BADDE5CEF68FC35314DF /* action_items.system.md in Resources */,
+				2F4D17A0DE4399141F81DA25 /* summary.system.md in Resources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXResourcesBuildPhase section */
+
+/* Begin PBXSourcesBuildPhase section */
+		774EDCE3C03BEBED9D57C008 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				676EB16AF871EDC219B9033D /* AppEnvironment.swift in Sources */,
+				D2233B040A885F22FD2A2ACD /* AudioPlaybackView.swift in Sources */,
+				655737F486FFA44CD6422CD7 /* BannerCoordinator.swift in Sources */,
+				0A4048BC3077756B43E64C5C /* CalendarAccessView.swift in Sources */,
+				4FE233322FB20C94006F29C4 /* MeetingEndBanner.swift in Sources */,
+				2DFACC0EBC269755DAC6E048 /* CalendarSettingsView.swift in Sources */,
+				2B328E480C6222351A847A2D /* FolderTreeView.swift in Sources */,
+				96E163FEDE0D952716940DF4 /* MeetingDetailView.swift in Sources */,
+				4FE233302FB20C8E006F29C4 /* MicActiveBanner.swift in Sources */,
+				6EBBBD06124AFCCADACF4757 /* ModelDownloadView.swift in Sources */,
+				A63D96C7DC9EA5594BA04817 /* NewMeetingSheet.swift in Sources */,
+				736E0E963334AD6D9DC4014D /* OllamaCheckView.swift in Sources */,
+				DE91E996433585F7D716E435 /* PermissionsView.swift in Sources */,
+				1ACD1614D2868F7F656CC41C /* RecordingBarView.swift in Sources */,
+				DAFBA525419AC3593E15C652 /* RootView.swift in Sources */,
+				4DFF5E1860DA6ED91537024A /* SettingsView.swift in Sources */,
+				3CD5B0718CDC4F204DD82E01 /* SidebarSelection.swift in Sources */,
+				33FFE4F5B4CA492FAF04C343 /* SuggestionBanner.swift in Sources */,
+				D64043B5A83483AE80CD1626 /* SummaryView.swift in Sources */,
+				3A6AF8EABE44CB002FB13860 /* TranscriptView.swift in Sources */,
+				F480CC67A2DFAB5C5AA8A0CE /* VibeMeetingsApp.swift in Sources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXSourcesBuildPhase section */
+
+/* Begin XCBuildConfiguration section */
+		117A103D690BF057215B1843 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
+				CODE_SIGN_ENTITLEMENTS = VibeMeetings/VibeMeetings.entitlements;
+				COMBINE_HIDPI_IMAGES = YES;
+				DEVELOPMENT_ASSET_PATHS = "\"VibeMeetings/Preview Content\"";
+				ENABLE_PREVIEWS = YES;
+				INFOPLIST_FILE = VibeMeetings/Info.plist;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/../Frameworks",
+				);
+				MACOSX_DEPLOYMENT_TARGET = 15.0;
+				PRODUCT_BUNDLE_IDENTIFIER = com.vibe.meetings;
+				PRODUCT_NAME = "vibe-meetings";
+				SDKROOT = macosx;
+			};
+			name = Debug;
+		};
+		A0A37D255ADC845EB136C987 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ALWAYS_SEARCH_USER_PATHS = NO;
+				CLANG_ANALYZER_NONNULL = YES;
+				CLANG_ANALYZER_NUMBER_OBJECT_CONVERSION = YES_AGGRESSIVE;
+				CLANG_CXX_LANGUAGE_STANDARD = "gnu++14";
+				CLANG_CXX_LIBRARY = "libc++";
+				CLANG_ENABLE_MODULES = YES;
+				CLANG_ENABLE_OBJC_ARC = YES;
+				CLANG_ENABLE_OBJC_WEAK = YES;
+				CLANG_WARN_BLOCK_CAPTURE_AUTORELEASING = YES;
+				CLANG_WARN_BOOL_CONVERSION = YES;
+				CLANG_WARN_COMMA = YES;
+				CLANG_WARN_CONSTANT_CONVERSION = YES;
+				CLANG_WARN_DEPRECATED_OBJC_IMPLEMENTATIONS = YES;
+				CLANG_WARN_DIRECT_OBJC_ISA_USAGE = YES_ERROR;
+				CLANG_WARN_DOCUMENTATION_COMMENTS = YES;
+				CLANG_WARN_EMPTY_BODY = YES;
+				CLANG_WARN_ENUM_CONVERSION = YES;
+				CLANG_WARN_INFINITE_RECURSION = YES;
+				CLANG_WARN_INT_CONVERSION = YES;
+				CLANG_WARN_NON_LITERAL_NULL_CONVERSION = YES;
+				CLANG_WARN_OBJC_IMPLICIT_RETAIN_SELF = YES;
+				CLANG_WARN_OBJC_LITERAL_CONVERSION = YES;
+				CLANG_WARN_OBJC_ROOT_CLASS = YES_ERROR;
+				CLANG_WARN_QUOTED_INCLUDE_IN_FRAMEWORK_HEADER = YES;
+				CLANG_WARN_RANGE_LOOP_ANALYSIS = YES;
+				CLANG_WARN_STRICT_PROTOTYPES = YES;
+				CLANG_WARN_SUSPICIOUS_MOVE = YES;
+				CLANG_WARN_UNGUARDED_AVAILABILITY = YES_AGGRESSIVE;
+				CLANG_WARN_UNREACHABLE_CODE = YES;
+				CLANG_WARN__DUPLICATE_METHOD_MATCH = YES;
+				CODE_SIGN_IDENTITY = "-";
+				CODE_SIGN_STYLE = Automatic;
+				COPY_PHASE_STRIP = NO;
+				DEAD_CODE_STRIPPING = YES;
+				DEBUG_INFORMATION_FORMAT = dwarf;
+				ENABLE_HARDENED_RUNTIME = YES;
+				ENABLE_STRICT_OBJC_MSGSEND = YES;
+				ENABLE_TESTABILITY = YES;
+				GCC_C_LANGUAGE_STANDARD = gnu11;
+				GCC_DYNAMIC_NO_PIC = NO;
+				GCC_NO_COMMON_BLOCKS = YES;
+				GCC_OPTIMIZATION_LEVEL = 0;
+				GCC_PREPROCESSOR_DEFINITIONS = (
+					"$(inherited)",
+					"DEBUG=1",
+				);
+				GCC_WARN_64_TO_32_BIT_CONVERSION = YES;
+				GCC_WARN_ABOUT_RETURN_TYPE = YES_ERROR;
+				GCC_WARN_UNDECLARED_SELECTOR = YES;
+				GCC_WARN_UNINITIALIZED_AUTOS = YES_AGGRESSIVE;
+				GCC_WARN_UNUSED_FUNCTION = YES;
+				GCC_WARN_UNUSED_VARIABLE = YES;
+				GENERATE_INFOPLIST_FILE = NO;
+				MACOSX_DEPLOYMENT_TARGET = 15.0;
+				MTL_ENABLE_DEBUG_INFO = INCLUDE_SOURCE;
+				MTL_FAST_MATH = YES;
+				ONLY_ACTIVE_ARCH = YES;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SDKROOT = macosx;
+				SWIFT_ACTIVE_COMPILATION_CONDITIONS = DEBUG;
+				SWIFT_OPTIMIZATION_LEVEL = "-Onone";
+				SWIFT_STRICT_CONCURRENCY = complete;
+				SWIFT_VERSION = 6.0;
+			};
+			name = Debug;
+		};
+		C90C38FCD79BDB3F6ABA7C80 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ALWAYS_SEARCH_USER_PATHS = NO;
+				CLANG_ANALYZER_NONNULL = YES;
+				CLANG_ANALYZER_NUMBER_OBJECT_CONVERSION = YES_AGGRESSIVE;
+				CLANG_CXX_LANGUAGE_STANDARD = "gnu++14";
+				CLANG_CXX_LIBRARY = "libc++";
+				CLANG_ENABLE_MODULES = YES;
+				CLANG_ENABLE_OBJC_ARC = YES;
+				CLANG_ENABLE_OBJC_WEAK = YES;
+				CLANG_WARN_BLOCK_CAPTURE_AUTORELEASING = YES;
+				CLANG_WARN_BOOL_CONVERSION = YES;
+				CLANG_WARN_COMMA = YES;
+				CLANG_WARN_CONSTANT_CONVERSION = YES;
+				CLANG_WARN_DEPRECATED_OBJC_IMPLEMENTATIONS = YES;
+				CLANG_WARN_DIRECT_OBJC_ISA_USAGE = YES_ERROR;
+				CLANG_WARN_DOCUMENTATION_COMMENTS = YES;
+				CLANG_WARN_EMPTY_BODY = YES;
+				CLANG_WARN_ENUM_CONVERSION = YES;
+				CLANG_WARN_INFINITE_RECURSION = YES;
+				CLANG_WARN_INT_CONVERSION = YES;
+				CLANG_WARN_NON_LITERAL_NULL_CONVERSION = YES;
+				CLANG_WARN_OBJC_IMPLICIT_RETAIN_SELF = YES;
+				CLANG_WARN_OBJC_LITERAL_CONVERSION = YES;
+				CLANG_WARN_OBJC_ROOT_CLASS = YES_ERROR;
+				CLANG_WARN_QUOTED_INCLUDE_IN_FRAMEWORK_HEADER = YES;
+				CLANG_WARN_RANGE_LOOP_ANALYSIS = YES;
+				CLANG_WARN_STRICT_PROTOTYPES = YES;
+				CLANG_WARN_SUSPICIOUS_MOVE = YES;
+				CLANG_WARN_UNGUARDED_AVAILABILITY = YES_AGGRESSIVE;
+				CLANG_WARN_UNREACHABLE_CODE = YES;
+				CLANG_WARN__DUPLICATE_METHOD_MATCH = YES;
+				CODE_SIGN_IDENTITY = "-";
+				CODE_SIGN_STYLE = Automatic;
+				COPY_PHASE_STRIP = NO;
+				DEAD_CODE_STRIPPING = YES;
+				DEBUG_INFORMATION_FORMAT = "dwarf-with-dsym";
+				ENABLE_HARDENED_RUNTIME = YES;
+				ENABLE_NS_ASSERTIONS = NO;
+				ENABLE_STRICT_OBJC_MSGSEND = YES;
+				GCC_C_LANGUAGE_STANDARD = gnu11;
+				GCC_NO_COMMON_BLOCKS = YES;
+				GCC_WARN_64_TO_32_BIT_CONVERSION = YES;
+				GCC_WARN_ABOUT_RETURN_TYPE = YES_ERROR;
+				GCC_WARN_UNDECLARED_SELECTOR = YES;
+				GCC_WARN_UNINITIALIZED_AUTOS = YES_AGGRESSIVE;
+				GCC_WARN_UNUSED_FUNCTION = YES;
+				GCC_WARN_UNUSED_VARIABLE = YES;
+				GENERATE_INFOPLIST_FILE = NO;
+				MACOSX_DEPLOYMENT_TARGET = 15.0;
+				MTL_ENABLE_DEBUG_INFO = NO;
+				MTL_FAST_MATH = YES;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SDKROOT = macosx;
+				SWIFT_COMPILATION_MODE = wholemodule;
+				SWIFT_OPTIMIZATION_LEVEL = "-O";
+				SWIFT_STRICT_CONCURRENCY = complete;
+				SWIFT_VERSION = 6.0;
+			};
+			name = Release;
+		};
+		D0E86220DBF4E543E1838F70 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
+				CODE_SIGN_ENTITLEMENTS = VibeMeetings/VibeMeetings.entitlements;
+				COMBINE_HIDPI_IMAGES = YES;
+				DEVELOPMENT_ASSET_PATHS = "\"VibeMeetings/Preview Content\"";
+				ENABLE_PREVIEWS = YES;
+				INFOPLIST_FILE = VibeMeetings/Info.plist;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/../Frameworks",
+				);
+				MACOSX_DEPLOYMENT_TARGET = 15.0;
+				PRODUCT_BUNDLE_IDENTIFIER = com.vibe.meetings;
+				PRODUCT_NAME = "vibe-meetings";
+				SDKROOT = macosx;
+			};
+			name = Release;
+		};
+/* End XCBuildConfiguration section */
+
+/* Begin XCConfigurationList section */
+		5FF14CAC84BE87A36B74AE01 /* Build configuration list for PBXNativeTarget "VibeMeetings" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				117A103D690BF057215B1843 /* Debug */,
+				D0E86220DBF4E543E1838F70 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Debug;
+		};
+		C4DACC5795EBE4E20138F1A1 /* Build configuration list for PBXProject "VibeMeetings" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				A0A37D255ADC845EB136C987 /* Debug */,
+				C90C38FCD79BDB3F6ABA7C80 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Debug;
+		};
+/* End XCConfigurationList section */
+
+/* Begin XCLocalSwiftPackageReference section */
+		430BD4BB2219276E32A0FDF7 /* XCLocalSwiftPackageReference "Packages/VMCore" */ = {
+			isa = XCLocalSwiftPackageReference;
+			relativePath = Packages/VMCore;
+		};
+		9234FFA763B6820CB6547A01 /* XCLocalSwiftPackageReference "Packages/VMRecording" */ = {
+			isa = XCLocalSwiftPackageReference;
+			relativePath = Packages/VMRecording;
+		};
+		933FBB087EEE2E7F850CC768 /* XCLocalSwiftPackageReference "Packages/VMSummarization" */ = {
+			isa = XCLocalSwiftPackageReference;
+			relativePath = Packages/VMSummarization;
+		};
+		9AE82E42D744F56485581B33 /* XCLocalSwiftPackageReference "Packages/VMStorage" */ = {
+			isa = XCLocalSwiftPackageReference;
+			relativePath = Packages/VMStorage;
+		};
+		AAA3B03BECFFAB865264E38D /* XCLocalSwiftPackageReference "Packages/VMTranscription" */ = {
+			isa = XCLocalSwiftPackageReference;
+			relativePath = Packages/VMTranscription;
+		};
+		D0318B290222D84F1A5786FA /* XCLocalSwiftPackageReference "Packages/VMCalendar" */ = {
+			isa = XCLocalSwiftPackageReference;
+			relativePath = Packages/VMCalendar;
+		};
+/* End XCLocalSwiftPackageReference section */
+
+/* Begin XCSwiftPackageProductDependency section */
+		88DB33C6801D1908FC092EAF /* VMCore */ = {
+			isa = XCSwiftPackageProductDependency;
+			productName = VMCore;
+		};
+		92C921174A047821FC67EA38 /* VMTranscription */ = {
+			isa = XCSwiftPackageProductDependency;
+			productName = VMTranscription;
+		};
+		99B4BD360F5F40E9ED80865F /* VMStorage */ = {
+			isa = XCSwiftPackageProductDependency;
+			productName = VMStorage;
+		};
+		AEEE339098DAF67BE5D6073B /* VMRecording */ = {
+			isa = XCSwiftPackageProductDependency;
+			productName = VMRecording;
+		};
+		B3AC476BB41917B26FAFA9BE /* VMCalendar */ = {
+			isa = XCSwiftPackageProductDependency;
+			productName = VMCalendar;
+		};
+		BAB8D0F0146E77D5FB61E695 /* VMSummarization */ = {
+			isa = XCSwiftPackageProductDependency;
+			productName = VMSummarization;
+		};
+/* End XCSwiftPackageProductDependency section */
+	};
+	rootObject = BF19ACA9B04254FF347207ED /* Project object */;
+}

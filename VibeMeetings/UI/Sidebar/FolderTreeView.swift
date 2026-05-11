@@ -1,4 +1,5 @@
 import SwiftUI
+import UniformTypeIdentifiers
 import VMCore
 
 /// Sidebar view backed by the on-disk tree. Selection is a `SidebarSelection`
@@ -116,15 +117,24 @@ struct FolderTreeView: View {
             Label {
                 VStack(alignment: .leading, spacing: 1) {
                     Text(meeting.title).lineLimit(1)
-                    Text(meeting.startedAt, style: .date)
+                    Text(meeting.startedAt, format: .dateTime.month(.abbreviated).day().hour().minute())
                         .font(.caption2)
                         .foregroundStyle(.secondary)
                 }
             } icon: {
                 Image(systemName: "waveform")
             }
+            .draggable(meeting.id.uuidString)
         } else {
             Label(node.name, systemImage: "folder")
+                .dropDestination(for: String.self) { items, _ in
+                    guard let idStr = items.first, let id = UUID(uuidString: idStr) else { return false }
+                    Task {
+                        try? await env.meetingStore.moveMeeting(id: id, to: node)
+                        await env.refreshFolderTree()
+                    }
+                    return true
+                }
         }
     }
 
@@ -139,6 +149,21 @@ struct FolderTreeView: View {
     private func contextMenu(for node: FolderNode) -> some View {
         if node.isMeeting, let meeting = node.meeting {
             Button("Rename…") { renameTarget = .meeting(id: meeting.id, currentName: meeting.title) }
+            if let root {
+                let folders = collectFolders(in: root)
+                if !folders.isEmpty {
+                    Menu("Move to…") {
+                        ForEach(folders, id: \.id) { folder in
+                            Button(folder.name) {
+                                Task {
+                                    try? await env.meetingStore.moveMeeting(id: meeting.id, to: folder)
+                                    await env.refreshFolderTree()
+                                }
+                            }
+                        }
+                    }
+                }
+            }
             Button("Show in Finder") { NSWorkspace.shared.activateFileViewerSelecting([node.url]) }
             Divider()
             Button("Delete…", role: .destructive) {
@@ -172,6 +197,18 @@ struct FolderTreeView: View {
             return nil
         }
     }
+}
+
+/// Collects all non-meeting folder nodes from the tree (for "Move to…" menu).
+private func collectFolders(in node: FolderNode) -> [FolderNode] {
+    var result: [FolderNode] = []
+    if !node.isMeeting {
+        result.append(node)
+        for child in node.children {
+            result.append(contentsOf: collectFolders(in: child))
+        }
+    }
+    return result
 }
 
 private extension FolderNode {

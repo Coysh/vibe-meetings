@@ -1,3 +1,4 @@
+import CoreAudio
 import Foundation
 
 public protocol AudioCaptureService: Sendable {
@@ -12,7 +13,8 @@ public protocol AudioCaptureService: Sendable {
 
     /// Begins capture. If `writingAudioTo` is non-nil, a 2-channel m4a file (mic on L,
     /// system on R) is written at that URL until `stop()`.
-    func start(writingAudioTo url: URL?) async throws
+    /// `micDeviceID` selects a specific input device; pass `nil` for the system default.
+    func start(writingAudioTo url: URL?, micDeviceID: AudioDeviceID?) async throws
 
     func pause() async
     func resume() async

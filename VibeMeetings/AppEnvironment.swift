@@ -1,3 +1,4 @@
+import CoreAudio
 import Foundation
 import Observation
 import VMCore
@@ -32,6 +33,17 @@ final class AppEnvironment {
     /// Selected Ollama model id (resolved at runtime from `/api/tags`).
     var selectedOllamaModelId: String
 
+    /// The UID of the user's preferred microphone, or `nil` for system default.
+    /// Persisted as a stable string that survives reboots (unlike `AudioDeviceID`).
+    var selectedMicDeviceUID: String?
+
+    /// Resolved `AudioDeviceID` from `selectedMicDeviceUID`. Returns `nil`
+    /// when no specific device is selected (use system default).
+    var selectedMicDeviceID: AudioDeviceID? {
+        guard let uid = selectedMicDeviceUID else { return nil }
+        return AudioDeviceEnumerator.inputDevices().first(where: { $0.uid == uid })?.id
+    }
+
     /// User-configured Ollama base URL. Defaults to `http://127.0.0.1:11434`;
     /// can be pointed at a self-hosted instance on the LAN
     /// (e.g. `http://192.168.1.50:11434`). The single non-loopback host this
@@ -49,11 +61,25 @@ final class AppEnvironment {
     enum PrivacyState: Sendable, Equatable {
         case localOnly
         case lan(host: String)
+        case cloud(provider: String)
         case downloadingModel(progress: Double)
     }
 
+    /// Which summarization backend is active: "ollama" or "openai".
+    var activeSummarizationKind: String
+
+    /// OpenAI API key (persisted in UserDefaults; empty = not configured).
+    var openAIApiKey: String
+
+    /// Selected OpenAI model id for summarization.
+    var selectedOpenAIModelId: String
+
     static let defaultOllamaURL = URL(string: "http://127.0.0.1:11434")!
     private static let ollamaURLKey = "VibeMeetings.OllamaBaseURL"
+    private static let micDeviceUIDKey = "VibeMeetings.SelectedMicDeviceUID"
+    private static let openAIKeyKey = "VibeMeetings.OpenAI.APIKey"
+    private static let openAIModelKey = "VibeMeetings.OpenAI.SelectedModelId"
+    private static let summEngineKey = "VibeMeetings.SummarizationEngine"
 
     init() throws {
         let defaults = UserDefaults.standard
@@ -91,19 +117,37 @@ final class AppEnvironment {
 
         self.selectedModelId = defaults.string(forKey: modelKey) ?? "whisper-medium"
         self.selectedOllamaModelId = defaults.string(forKey: ollamaModelKey) ?? "llama3.1:8b-instruct-q4_K_M"
+        self.selectedMicDeviceUID = defaults.string(forKey: Self.micDeviceUIDKey)
 
         let storedOllama = (defaults.string(forKey: Self.ollamaURLKey)).flatMap(URL.init(string:))
         let resolvedOllama = storedOllama ?? Self.defaultOllamaURL
         self.ollamaBaseURL = resolvedOllama
         AppEnvironment.applyAllowedOllamaHost(resolvedOllama)
 
-        self.summarizationEngine = OllamaEngine(baseURL: resolvedOllama, promptBundle: .main)
+        let storedOpenAIKey = defaults.string(forKey: Self.openAIKeyKey) ?? ""
+        let storedOpenAIModel = defaults.string(forKey: Self.openAIModelKey) ?? "gpt-4o-mini"
+        let storedSummKind = defaults.string(forKey: Self.summEngineKey) ?? OllamaEngine.kind
+
+        self.openAIApiKey = storedOpenAIKey
+        self.selectedOpenAIModelId = storedOpenAIModel
+
+        if storedSummKind == OpenAIEngine.kind && !storedOpenAIKey.isEmpty {
+            self.summarizationEngine = OpenAIEngine(apiKey: storedOpenAIKey, promptBundle: .main)
+            self.activeSummarizationKind = OpenAIEngine.kind
+        } else {
+            self.summarizationEngine = OllamaEngine(baseURL: resolvedOllama, promptBundle: .main)
+            self.activeSummarizationKind = OllamaEngine.kind
+        }
 
         let cal = EventKitCalendarService()
         self.calendarService = cal
         self.bannerCoordinator = BannerCoordinator(calendar: cal)
 
-        self.privacyState = AppEnvironment.privacyState(for: resolvedOllama)
+        if storedSummKind == OpenAIEngine.kind && !storedOpenAIKey.isEmpty {
+            self.privacyState = .cloud(provider: "OpenAI")
+        } else {
+            self.privacyState = AppEnvironment.privacyState(for: resolvedOllama)
+        }
     }
 
     /// Fetch the latest tree from the store and update `folderTree` on the
@@ -121,6 +165,17 @@ final class AppEnvironment {
         }
     }
 
+    /// Update the selected microphone device and persist.
+    /// Pass `nil` to revert to the system default input.
+    func setMicDevice(uid: String?) {
+        self.selectedMicDeviceUID = uid
+        if let uid {
+            UserDefaults.standard.set(uid, forKey: Self.micDeviceUIDKey)
+        } else {
+            UserDefaults.standard.removeObject(forKey: Self.micDeviceUIDKey)
+        }
+    }
+
     /// Update the Ollama endpoint, persist, rebuild the engine, and update
     /// the LocalhostOnlySession allowlist + privacy badge to match.
     func setOllamaBaseURL(_ url: URL) {
@@ -129,6 +184,26 @@ final class AppEnvironment {
         AppEnvironment.applyAllowedOllamaHost(url)
         self.summarizationEngine = OllamaEngine(baseURL: url, promptBundle: .main)
         self.privacyState = AppEnvironment.privacyState(for: url)
+    }
+
+    /// Switch to the OpenAI summarization engine.
+    func setOpenAI(apiKey: String, modelId: String) {
+        self.openAIApiKey = apiKey
+        self.selectedOpenAIModelId = modelId
+        self.activeSummarizationKind = OpenAIEngine.kind
+        UserDefaults.standard.set(apiKey, forKey: Self.openAIKeyKey)
+        UserDefaults.standard.set(modelId, forKey: Self.openAIModelKey)
+        UserDefaults.standard.set(OpenAIEngine.kind, forKey: Self.summEngineKey)
+        self.summarizationEngine = OpenAIEngine(apiKey: apiKey, promptBundle: .main)
+        self.privacyState = .cloud(provider: "OpenAI")
+    }
+
+    /// Switch back to Ollama summarization.
+    func setOllamaAsSummarizer() {
+        self.activeSummarizationKind = OllamaEngine.kind
+        UserDefaults.standard.set(OllamaEngine.kind, forKey: Self.summEngineKey)
+        self.summarizationEngine = OllamaEngine(baseURL: ollamaBaseURL, promptBundle: .main)
+        self.privacyState = AppEnvironment.privacyState(for: ollamaBaseURL)
     }
 
     private static func applyAllowedOllamaHost(_ url: URL) {

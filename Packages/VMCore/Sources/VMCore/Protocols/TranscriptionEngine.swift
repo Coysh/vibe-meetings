@@ -11,7 +11,7 @@ public protocol TranscriptionEngine: Sendable {
     func availableModels() async throws -> [TranscriptionModelInfo]
 
     /// Loads a model into memory. Idempotent — calling twice with the same id is a no-op.
-    func loadModel(id: String, progress: @Sendable (Double) -> Void) async throws
+    func loadModel(id: String, progress: @escaping @Sendable (Double) -> Void) async throws
 
     /// Batch transcription of a complete audio file. Used for imports and re-transcribe.
     func transcribeFile(
@@ -30,10 +30,25 @@ public protocol TranscriptionEngine: Sendable {
     ) -> AsyncThrowingStream<TranscriptSegment, Error>
 }
 
-public enum TranscriptionEngineError: Error, Sendable, Equatable {
+public enum TranscriptionEngineError: Error, Sendable, Equatable, LocalizedError {
     case modelNotLoaded
     case modelNotFound(id: String)
     case unsupportedAudioFormat(String)
     case engineUnavailable(reason: String)
     case cancelled
+
+    public var errorDescription: String? {
+        switch self {
+        case .modelNotLoaded:
+            return "No transcription model is loaded."
+        case .modelNotFound(let id):
+            return "Transcription model '\(id)' not found in catalog."
+        case .unsupportedAudioFormat(let fmt):
+            return "Unsupported audio format: \(fmt)"
+        case .engineUnavailable(let reason):
+            return "Engine unavailable: \(reason)"
+        case .cancelled:
+            return "Transcription was cancelled."
+        }
+    }
 }

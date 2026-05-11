@@ -1,6 +1,8 @@
 import SwiftUI
+import VMCalendar
 import VMCore
 import VMRecording
+import VMSummarization
 import VMTranscription
 import VMStorage
 
@@ -16,6 +18,12 @@ final class RecordingController {
     var liveSegments: [TranscriptSegment] = []
     var meetingHandle: MeetingHandle?
 
+    /// The calendar event linked to this recording, if any. Used for auto-end detection.
+    var linkedCalendarEvent: CalendarEvent?
+
+    /// User's free-form notes taken during the meeting.
+    var notes: String = ""
+
     private let env: AppEnvironment
     private let coordinator = AudioCaptureCoordinator()
     private let merger = SegmentMerger()
@@ -27,8 +35,40 @@ final class RecordingController {
         self.env = env
     }
 
+    deinit {
+        print("[RecordingController] DEINIT — RecordingController is being deallocated!")
+    }
+
+    /// Resume recording for an existing meeting. Loads the previously saved
+    /// segments so they appear in the live view, then starts a new audio
+    /// capture session. The new audio replaces the old audio file.
+    func resume(handle: MeetingHandle) async {
+        // Load existing segments so the live view shows the full history.
+        if let existing = try? await env.meetingStore.loadTranscript(for: handle.meeting.id) {
+            for seg in existing {
+                merger.ingest(seg)
+            }
+            liveSegments = merger.snapshot()
+        }
+        // Load existing notes.
+        if let existingNotes = try? await env.meetingStore.loadNotes(for: handle.meeting.id) {
+            notes = existingNotes
+        }
+        // Clear the endedAt so the meeting appears as in-progress again.
+        var updated = handle.meeting
+        updated.endedAt = nil
+        try? FolderTreeScanner.writeMeeting(updated, to: MeetingFolder(url: handle.folderURL).metadataURL)
+
+        await start(handle: handle)
+    }
+
     func start(handle: MeetingHandle) async {
         self.meetingHandle = handle
+        // Look up the linked calendar event for auto-end detection.
+        if let eventID = handle.meeting.calendarEventID {
+            let events = await env.calendarService.upcomingEvents(within: 24 * 60 * 60)
+            self.linkedCalendarEvent = events.first(where: { $0.id == eventID })
+        }
         let audioURL = handle.folderURL.appendingPathComponent(MeetingFolder.audioFilename)
 
         // 1. Make sure the transcription model is loaded before audio capture
@@ -49,15 +89,21 @@ final class RecordingController {
             env.privacyState = .localOnly
             return
         }
-        // Reset privacy badge to whatever Ollama state we resolved at boot.
-        env.privacyState = (env.ollamaBaseURL.host.flatMap { LocalhostOnlySession.isLoopback($0) } == false
-                            && env.ollamaBaseURL.host != nil)
-            ? .lan(host: env.ollamaBaseURL.host!)
-            : .localOnly
+        // Reset privacy badge to reflect the active summarization engine.
+        if env.activeSummarizationKind == OpenAIEngine.kind {
+            env.privacyState = .cloud(provider: "OpenAI")
+        } else if let host = env.ollamaBaseURL.host,
+                  !LocalhostOnlySession.isLoopback(host) {
+            env.privacyState = .lan(host: host)
+        } else {
+            env.privacyState = .localOnly
+        }
 
         // 2. Start audio capture.
+        let micID = env.selectedMicDeviceID
+        print("[RecordingController] selectedMicDeviceUID=\(env.selectedMicDeviceUID ?? "nil"), resolved deviceID=\(String(describing: micID))")
         do {
-            try await coordinator.start(writingAudioTo: audioURL)
+            try await coordinator.start(writingAudioTo: audioURL, micDeviceID: micID)
         } catch {
             state = .error(error.localizedDescription)
             return
@@ -77,33 +123,34 @@ final class RecordingController {
             speakerId: Speaker.others.id,
             options: .default
         )
-        streamTasks.append(Task { [weak self] in
+        // NOTE: These tasks capture `self` strongly so the RecordingController
+        // stays alive while recording. The retain cycle is broken in stop() which
+        // cancels all tasks and clears the arrays.
+        streamTasks.append(Task {
             do {
-                for try await seg in micStream { await self?.ingest(seg) }
+                for try await seg in micStream { self.ingest(seg) }
             } catch { print("mic stream error: \(error)") }
         })
-        streamTasks.append(Task { [weak self] in
+        streamTasks.append(Task {
             do {
-                for try await seg in sysStream { await self?.ingest(seg) }
+                for try await seg in sysStream { self.ingest(seg) }
             } catch { print("sys stream error: \(error)") }
         })
 
         // Levels
         let levelStream = coordinator.levels
-        streamTasks.append(Task { [weak self] in
+        streamTasks.append(Task {
             for await snap in levelStream {
-                await MainActor.run {
-                    self?.micLevel = snap.mic
-                    self?.systemLevel = snap.system
-                }
+                self.micLevel = snap.mic
+                self.systemLevel = snap.system
             }
         })
 
-        clockTask = Task { [weak self] in
+        clockTask = Task {
             let started = Date()
             while !Task.isCancelled {
                 try? await Task.sleep(for: .milliseconds(250))
-                self?.elapsed = Date().timeIntervalSince(started)
+                self.elapsed = Date().timeIntervalSince(started)
             }
         }
     }
@@ -122,9 +169,20 @@ final class RecordingController {
         clockTask?.cancel(); clockTask = nil
 
         if let handle = meetingHandle {
-            // Persist finals and update meeting metadata.
-            let finals = merger.finals()
-            try? await env.meetingStore.replaceTranscript(finals, for: handle.meeting.id)
+            // Persist transcript. In streaming mode every segment is marked
+            // partial (there's no explicit finalization step), so we promote
+            // all partials to finals before saving.
+            let allSegments = merger.snapshot().map { seg in
+                var s = seg
+                s.isPartial = false
+                return s
+            }
+            try? await env.meetingStore.replaceTranscript(allSegments, for: handle.meeting.id)
+
+            // Persist user notes if any were taken.
+            if !notes.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                try? await env.meetingStore.writeNotes(notes, for: handle.meeting.id)
+            }
 
             var updated = handle.meeting
             updated.endedAt = Date()
@@ -134,6 +192,7 @@ final class RecordingController {
         state = .idle
         if env.activeRecordingController === self {
             env.activeRecordingController = nil
+            env.bannerCoordinator.recordingDidStop()
         }
         return result
     }
@@ -141,38 +200,58 @@ final class RecordingController {
 
 struct RecordingBarView: View {
     @Bindable var controller: RecordingController
+    @State private var showNotes = false
 
     var body: some View {
-        HStack(spacing: 12) {
-            Circle()
-                .fill(controller.state == .recording ? Color.red : Color.gray)
-                .frame(width: 12, height: 12)
+        VStack(spacing: 0) {
+            HStack(spacing: 12) {
+                Circle()
+                    .fill(controller.state == .recording ? Color.red : Color.gray)
+                    .frame(width: 12, height: 12)
 
-            if case .preparing = controller.state {
-                ProgressView().controlSize(.small)
-                Text("Loading model…").font(.caption).foregroundStyle(.secondary)
-            } else if case .error(let msg) = controller.state {
-                Image(systemName: "exclamationmark.triangle.fill").foregroundStyle(.orange)
-                Text(msg).font(.caption).foregroundStyle(.orange).lineLimit(1)
-            } else {
-                Text(controller.elapsed.formattedTimestamp)
-                    .font(.title3.monospacedDigit())
-                LevelMeterView(level: controller.micLevel, label: "You")
-                LevelMeterView(level: controller.systemLevel, label: "Others")
-            }
-
-            Spacer()
-
-            if controller.state == .recording {
-                Button("Stop") {
-                    Task { await controller.stop() }
+                if case .preparing = controller.state {
+                    ProgressView().controlSize(.small)
+                    Text("Loading model…").font(.caption).foregroundStyle(.secondary)
+                } else if case .error(let msg) = controller.state {
+                    Image(systemName: "exclamationmark.triangle.fill").foregroundStyle(.orange)
+                    Text(msg).font(.caption).foregroundStyle(.orange).lineLimit(1)
+                } else {
+                    Text(controller.elapsed.formattedTimestamp)
+                        .font(.title3.monospacedDigit())
+                    LevelMeterView(level: controller.micLevel, label: "You")
+                    LevelMeterView(level: controller.systemLevel, label: "Others")
                 }
-                .buttonStyle(.borderedProminent)
-                .tint(.red)
+
+                Spacer()
+
+                if controller.state == .recording {
+                    Button {
+                        withAnimation(.easeInOut(duration: 0.2)) { showNotes.toggle() }
+                    } label: {
+                        Image(systemName: showNotes ? "note.text.badge.plus" : "note.text")
+                    }
+                    .help("Meeting notes")
+
+                    Button("Stop") {
+                        Task { await controller.stop() }
+                    }
+                    .buttonStyle(.borderedProminent)
+                    .tint(.red)
+                }
+            }
+            .padding(.horizontal, 16)
+            .padding(.vertical, 10)
+
+            if showNotes && controller.state == .recording {
+                Divider()
+                TextEditor(text: Bindable(controller).notes)
+                    .font(.body)
+                    .frame(height: 80)
+                    .scrollContentBackground(.hidden)
+                    .padding(.horizontal, 16)
+                    .padding(.vertical, 6)
             }
         }
-        .padding(.horizontal, 16)
-        .padding(.vertical, 10)
         .background(.ultraThinMaterial)
     }
 }

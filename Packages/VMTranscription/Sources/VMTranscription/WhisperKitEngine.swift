@@ -43,7 +43,7 @@ public final class WhisperKitEngine: TranscriptionEngine, @unchecked Sendable {
         }
     }
 
-    public func loadModel(id: String, progress: @Sendable (Double) -> Void) async throws {
+    public func loadModel(id: String, progress: @escaping @Sendable (Double) -> Void) async throws {
         let already = state.withLock { s -> Bool in
             s.loadedModelId == id && s.pipeline != nil
         }
@@ -57,19 +57,43 @@ public final class WhisperKitEngine: TranscriptionEngine, @unchecked Sendable {
         let exists = ModelCatalog.isDownloaded(entry)
 
         // WhisperKit's `modelFolder` is the exact directory where component
-        // files (MelSpectrogram.mlmodelc etc.) live. Its `model` parameter
-        // must be the HuggingFace variant name — "openai_whisper-medium" not
-        // our internal catalog id "whisper-medium". We derive it from the
-        // sourceURL which already encodes the correct name.
-        let whisperKitModelName = entry.sourceURL.lastPathComponent
+        // files (MelSpectrogram.mlmodelc etc.) live.
+        //
+        // IMPORTANT: When `modelFolder` is passed to WhisperKitConfig, the
+        // `download` and `model` parameters are ignored — WhisperKit uses
+        // the folder as-is. So we must download separately first, then point
+        // WhisperKit at the populated directory.
+        if !exists {
+            let whisperKitModelName = entry.sourceURL.lastPathComponent
+            let downloadedURL = try await WhisperKit.download(
+                variant: whisperKitModelName
+            ) { dlProgress in
+                progress(dlProgress.fractionCompleted)
+            }
+
+            // Copy downloaded files from the Hub cache into our install dir
+            // so `isDownloaded` returns true on subsequent launches.
+            let fm = FileManager.default
+            try fm.createDirectory(at: installURL, withIntermediateDirectories: true)
+            let items = try fm.contentsOfDirectory(
+                at: downloadedURL,
+                includingPropertiesForKeys: nil
+            )
+            for item in items {
+                let dest = installURL.appendingPathComponent(item.lastPathComponent)
+                if !fm.fileExists(atPath: dest.path) {
+                    try fm.copyItem(at: item, to: dest)
+                }
+            }
+        }
+
         let config = WhisperKitConfig(
-            model: whisperKitModelName,
             modelFolder: installURL.path,
             verbose: false,
             logLevel: .none,
             prewarm: true,
             load: true,
-            download: !exists
+            download: false
         )
         let pipe = try await WhisperKit(config)
         progress(1.0)
@@ -116,7 +140,7 @@ public final class WhisperKitEngine: TranscriptionEngine, @unchecked Sendable {
 
             let decodingOptions = Self.makeDecodingOptions(for: options, isStreaming: true)
             let task = Task {
-                let streamer = StreamingTranscriber(config: .init(windowSeconds: 30, hopSeconds: 1.5))
+                let streamer = StreamingTranscriber()
                 await streamer.run(input: input) { samples, windowStart in
                     do {
                         let pipeline = pipelineBox.value
@@ -177,9 +201,11 @@ public final class WhisperKitEngine: TranscriptionEngine, @unchecked Sendable {
         var out: [TranscriptSegment] = []
         for result in results {
             for seg in result.segments {
+                let cleaned = stripSpecialTokens(seg.text)
+                guard !cleaned.isEmpty else { continue }
                 let words = seg.words?.map { w in
                     Word(
-                        text: w.word,
+                        text: stripSpecialTokens(w.word),
                         start: TimeInterval(w.start) + timeOffset,
                         end: TimeInterval(w.end) + timeOffset,
                         probability: w.probability
@@ -190,7 +216,7 @@ public final class WhisperKitEngine: TranscriptionEngine, @unchecked Sendable {
                     channel: channel,
                     start: TimeInterval(seg.start) + timeOffset,
                     end: TimeInterval(seg.end) + timeOffset,
-                    text: seg.text,
+                    text: cleaned,
                     isPartial: isPartial,
                     confidence: nil,
                     words: words
@@ -198,5 +224,14 @@ public final class WhisperKitEngine: TranscriptionEngine, @unchecked Sendable {
             }
         }
         return out
+    }
+
+    /// Remove WhisperKit special tokens like `<|startoftranscript|>`,
+    /// `<|en|>`, `<|transcribe|>`, `<|0.00|>`, `<|endoftext|>`, etc.
+    /// Also strips Whisper noise markers like `[BLANK_AUDIO]`.
+    private static func stripSpecialTokens(_ text: String) -> String {
+        text.replacing(/<\|[^|]*\|>/,  with: "")
+            .replacing(/\[BLANK_AUDIO\]/, with: "")
+            .trimmingCharacters(in: .whitespacesAndNewlines)
     }
 }

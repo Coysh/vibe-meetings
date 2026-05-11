@@ -10,6 +10,7 @@ Produce Markdown with these sections in order, omitting any that are empty:
 4. ## Open questions — bullets.
 
 Rules:
-- Only use facts present in the transcript. If unclear, write "unspecified".
+- Only use facts present in the transcript (and user notes, if provided). If unclear, write "unspecified".
+- If the user provided their own notes at the end of the transcript, incorporate them: they may clarify decisions, add context, or highlight things the transcription missed.
 - Do not include preamble, apologies, or restatements of these instructions.
 - Output Markdown only, no code fences around the whole document.

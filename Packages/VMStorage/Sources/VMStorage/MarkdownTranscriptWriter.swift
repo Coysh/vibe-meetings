@@ -33,10 +33,20 @@ public enum MarkdownTranscriptWriter {
             uniqueKeysWithValues: meeting.participants.map { ($0.id, $0.displayName) }
         )
 
+        // Merge consecutive segments from the same speaker into a single
+        // block so the transcript reads naturally for LLM consumption.
+        var lastSpeaker: String?
         for seg in segments where !seg.isPartial {
+            let text = seg.text.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !text.isEmpty else { continue }
+
             let name = speakerNames[seg.speakerId] ?? seg.speakerId.capitalized
-            out += "**[\(seg.start.formattedTimestamp)] \(name)**\n"
-            out += "\(seg.text.trimmingCharacters(in: .whitespacesAndNewlines))\n\n"
+            if seg.speakerId != lastSpeaker {
+                if lastSpeaker != nil { out += "\n" }
+                out += "**\(name):**\n"
+                lastSpeaker = seg.speakerId
+            }
+            out += "\(text)\n"
         }
         return out
     }

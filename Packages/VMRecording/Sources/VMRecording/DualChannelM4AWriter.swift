@@ -12,13 +12,15 @@ import VMCore
 public final class DualChannelM4AWriter: @unchecked Sendable {
     private let writer: AVAssetWriter
     private let input: AVAssetWriterInput
-    private let outputFormat: AVAudioFormat
     private let queue = DispatchQueue(label: "vibe.dual-m4a-writer")
 
     private var micBuffer: [Float] = []
     private var sysBuffer: [Float] = []
     private var sampleIndex: Int64 = 0
     private var isStarted = false
+    private var micHasData = false
+    private var sysHasData = false
+    private var flushCount = 0
 
     private let micConverter = AudioFormatConverter48kMono()
     private let sysConverter = AudioFormatConverter48kMono()
@@ -38,12 +40,6 @@ public final class DualChannelM4AWriter: @unchecked Sendable {
         self.input = inp
         writer.add(inp)
 
-        self.outputFormat = AVAudioFormat(
-            commonFormat: .pcmFormatFloat32,
-            sampleRate: 48_000,
-            channels: 2,
-            interleaved: true
-        )!
     }
 
     public func start() {
@@ -58,96 +54,180 @@ public final class DualChannelM4AWriter: @unchecked Sendable {
     public func appendMic(_ wrapper: SendableAudioBuffer) {
         let buffer = wrapper.buffer
         guard let samples = try? micConverter.convert(buffer) else { return }
-        queue.async { self.micBuffer.append(contentsOf: samples); self.flushIfReady() }
+        queue.async {
+            self.micHasData = true
+            self.micBuffer.append(contentsOf: samples)
+            self.flushIfReady()
+        }
     }
 
     public func appendSystem(_ wrapper: SendableAudioBuffer) {
         let buffer = wrapper.buffer
         guard let samples = try? sysConverter.convert(buffer) else { return }
-        queue.async { self.sysBuffer.append(contentsOf: samples); self.flushIfReady() }
+        queue.async {
+            self.sysHasData = true
+            self.sysBuffer.append(contentsOf: samples)
+            self.flushIfReady()
+        }
     }
 
     private func flushIfReady() {
-        let n = min(micBuffer.count, sysBuffer.count)
-        guard n >= 4_800 else { return } // ~100 ms at 48 kHz
+        // Determine how many frames we can write. If one channel has no data
+        // at all (system tap failed, or mic is the only source), pad it with
+        // silence so the writer isn't blocked indefinitely.
+        let threshold = 4_800 // ~100 ms at 48 kHz
+        let micN = micBuffer.count
+        let sysN = sysBuffer.count
 
+        let n: Int
+        if micHasData && sysHasData {
+            n = min(micN, sysN)
+        } else if micHasData {
+            n = micN
+        } else if sysHasData {
+            n = sysN
+        } else {
+            return
+        }
+        guard n >= threshold else { return }
         guard input.isReadyForMoreMediaData else { return }
 
-        let interleaved = UnsafeMutablePointer<Float>.allocate(capacity: n * 2)
-        defer { interleaved.deallocate() }
-        for i in 0..<n {
-            interleaved[i * 2] = micBuffer[i]
-            interleaved[i * 2 + 1] = sysBuffer[i]
-        }
-        micBuffer.removeFirst(n)
-        sysBuffer.removeFirst(n)
+        writeFrames(n, micN: micN, sysN: sysN)
 
-        guard let pcm = AVAudioPCMBuffer(pcmFormat: outputFormat, frameCapacity: AVAudioFrameCount(n)) else { return }
-        pcm.frameLength = AVAudioFrameCount(n)
-        if let dst = pcm.floatChannelData?[0] {
-            memcpy(dst, interleaved, n * 2 * MemoryLayout<Float>.size)
+        flushCount += 1
+        if flushCount <= 3 {
+            print("[M4AWriter] flush #\(flushCount): \(n) frames, mic=\(micN)/sys=\(sysN)")
         }
+    }
+
+    /// Interleave `n` frames from the mic and sys buffers into an Int16 stereo
+    /// CMSampleBuffer and append it to the asset writer input.
+    private func writeFrames(_ n: Int, micN: Int, sysN: Int) {
+        // Build interleaved Int16 stereo: [L0, R0, L1, R1, …]
+        let sampleCount = n * 2
+        var int16 = [Int16](repeating: 0, count: sampleCount)
+        for i in 0..<n {
+            let micSample = i < micN ? micBuffer[i] : Float(0)
+            let sysSample = i < sysN ? sysBuffer[i] : Float(0)
+            int16[i * 2]     = floatToInt16(micSample)
+            int16[i * 2 + 1] = floatToInt16(sysSample)
+        }
+        if micN >= n { micBuffer.removeFirst(n) } else { micBuffer.removeAll() }
+        if sysN >= n { sysBuffer.removeFirst(n) } else { sysBuffer.removeAll() }
 
         let pts = CMTime(value: sampleIndex, timescale: 48_000)
         sampleIndex += Int64(n)
 
-        if let cmBuffer = makeCMSampleBuffer(pcm: pcm, presentationTime: pts) {
-            input.append(cmBuffer)
+        if let sb = makeCMSampleBuffer(int16: &int16, frameCount: n, presentationTime: pts) {
+            let ok = input.append(sb)
+            if !ok && flushCount < 3 {
+                print("[M4AWriter] append failed, writer status=\(writer.status.rawValue), error=\(String(describing: writer.error))")
+            }
         }
     }
 
     public func stop(completion: @escaping (URL?) -> Void) {
         queue.async {
-            self.flushIfReady()
+            // Flush any remaining samples with a lowered threshold.
+            let n = max(self.micBuffer.count, self.sysBuffer.count)
+            if n > 0 {
+                let micN = self.micBuffer.count
+                let sysN = self.sysBuffer.count
+                self.writeFrames(n, micN: micN, sysN: sysN)
+            }
+            print("[M4AWriter] stop: \(self.flushCount) flushes, \(self.sampleIndex) total samples, writer status=\(self.writer.status.rawValue)")
             self.input.markAsFinished()
             self.writer.finishWriting {
                 let url = self.writer.status == .completed ? self.writer.outputURL : nil
+                if self.writer.status != .completed {
+                    print("[M4AWriter] finishWriting failed: status=\(self.writer.status.rawValue), error=\(String(describing: self.writer.error))")
+                }
                 completion(url)
             }
         }
     }
 
-    private func makeCMSampleBuffer(pcm: AVAudioPCMBuffer, presentationTime: CMTime) -> CMSampleBuffer? {
-        let asbd = pcm.format.streamDescription.pointee
+    /// Convert Float32 [-1, 1] to Int16 with clamping.
+    private func floatToInt16(_ f: Float) -> Int16 {
+        let clamped = max(-1.0, min(1.0, f))
+        return Int16(clamped * Float(Int16.max))
+    }
+
+    /// Build a CMSampleBuffer from interleaved Int16 stereo data.
+    private func makeCMSampleBuffer(int16: inout [Int16], frameCount: Int, presentationTime: CMTime) -> CMSampleBuffer? {
+        // ASBD for interleaved Int16 stereo at 48 kHz.
+        var asbd = AudioStreamBasicDescription(
+            mSampleRate: 48_000,
+            mFormatID: kAudioFormatLinearPCM,
+            mFormatFlags: kLinearPCMFormatFlagIsSignedInteger | kLinearPCMFormatFlagIsPacked,
+            mBytesPerPacket: 4,   // 2 channels × 2 bytes
+            mFramesPerPacket: 1,
+            mBytesPerFrame: 4,
+            mChannelsPerFrame: 2,
+            mBitsPerChannel: 16,
+            mReserved: 0
+        )
+
+        // Provide a stereo channel layout so the AAC encoder (and later AVPlayer)
+        // correctly maps L/R channels.
+        var layout = AudioChannelLayout(
+            mChannelLayoutTag: kAudioChannelLayoutTag_Stereo,
+            mChannelBitmap: [],
+            mNumberChannelDescriptions: 0,
+            mChannelDescriptions: AudioChannelDescription(
+                mChannelLabel: kAudioChannelLabel_Left,
+                mChannelFlags: [],
+                mCoordinates: (0, 0, 0)
+            )
+        )
+        let layoutSize = MemoryLayout<AudioChannelLayout>.size
+
         var formatDesc: CMAudioFormatDescription?
         guard CMAudioFormatDescriptionCreate(
             allocator: kCFAllocatorDefault,
-            asbd: pcm.format.streamDescription,
-            layoutSize: 0,
-            layout: nil,
+            asbd: &asbd,
+            layoutSize: layoutSize,
+            layout: &layout,
             magicCookieSize: 0,
             magicCookie: nil,
             extensions: nil,
             formatDescriptionOut: &formatDesc
         ) == noErr, let formatDesc else { return nil }
 
-        var sb: CMSampleBuffer?
-        var timing = CMSampleTimingInfo(
-            duration: CMTime(value: CMTimeValue(pcm.frameLength), timescale: CMTimeScale(asbd.mSampleRate)),
-            presentationTimeStamp: presentationTime,
-            decodeTimeStamp: .invalid
-        )
-        guard CMSampleBufferCreate(
+        let byteCount = frameCount * 4  // 2 channels × 2 bytes per sample
+        var blockBuffer: CMBlockBuffer?
+        // Allocate a block buffer and copy Int16 data into it.
+        guard CMBlockBufferCreateWithMemoryBlock(
             allocator: kCFAllocatorDefault,
-            dataBuffer: nil,
-            dataReady: false,
-            makeDataReadyCallback: nil,
-            refcon: nil,
-            formatDescription: formatDesc,
-            sampleCount: CMItemCount(pcm.frameLength),
-            sampleTimingEntryCount: 1,
-            sampleTimingArray: &timing,
-            sampleSizeEntryCount: 0,
-            sampleSizeArray: nil,
-            sampleBufferOut: &sb
-        ) == noErr, let sb else { return nil }
-
-        guard CMSampleBufferSetDataBufferFromAudioBufferList(
-            sb,
-            blockBufferAllocator: kCFAllocatorDefault,
-            blockBufferMemoryAllocator: kCFAllocatorDefault,
+            memoryBlock: nil,
+            blockLength: byteCount,
+            blockAllocator: kCFAllocatorDefault,
+            customBlockSource: nil,
+            offsetToData: 0,
+            dataLength: byteCount,
             flags: 0,
-            bufferList: pcm.audioBufferList
+            blockBufferOut: &blockBuffer
+        ) == noErr, let bb = blockBuffer else { return nil }
+
+        // Copy actual data into the block buffer.
+        guard int16.withUnsafeBytes({ rawBuf -> OSStatus in
+            CMBlockBufferReplaceDataBytes(
+                with: rawBuf.baseAddress!,
+                blockBuffer: bb,
+                offsetIntoDestination: 0,
+                dataLength: byteCount
+            )
+        }) == noErr else { return nil }
+
+        var sb: CMSampleBuffer?
+        guard CMAudioSampleBufferCreateReadyWithPacketDescriptions(
+            allocator: kCFAllocatorDefault,
+            dataBuffer: bb,
+            formatDescription: formatDesc,
+            sampleCount: CMItemCount(frameCount),
+            presentationTimeStamp: presentationTime,
+            packetDescriptions: nil,
+            sampleBufferOut: &sb
         ) == noErr else { return nil }
 
         return sb
@@ -172,6 +252,7 @@ final class AudioFormatConverter48kMono {
             converter = AVAudioConverter(from: buffer.format, to: outputFormat)
         }
         guard let converter else { return [] }
+        converter.reset()
 
         let ratio = outputFormat.sampleRate / buffer.format.sampleRate
         let capacity = AVAudioFrameCount(Double(buffer.frameLength) * ratio + 16)
