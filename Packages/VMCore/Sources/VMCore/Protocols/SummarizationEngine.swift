@@ -9,12 +9,14 @@ public protocol SummarizationEngine: Sendable {
 
     /// Streams Markdown chunks. Caller appends to `summary.md` as they arrive.
     /// The stream finishes when the model emits its end-of-response token.
+    /// `customPrompt` overrides the bundled system prompt when non-empty.
     func summarize(
         transcript: [TranscriptSegment],
         meeting: Meeting,
         modelId: String,
         style: SummaryStyle,
-        userNotes: String?
+        userNotes: String?,
+        customPrompt: String?
     ) -> AsyncThrowingStream<String, Error>
 }
 

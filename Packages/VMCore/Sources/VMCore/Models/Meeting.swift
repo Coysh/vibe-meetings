@@ -20,6 +20,19 @@ public struct EngineRef: Codable, Hashable, Sendable {
     }
 }
 
+public enum MeetingType: String, Codable, Sendable, CaseIterable {
+    case oneOnOne = "1-1"
+    case group = "meeting"
+
+    /// Auto-detect from title string. Returns `.oneOnOne` if the title
+    /// contains common 1:1 patterns, `.group` otherwise.
+    public static func detect(from title: String) -> MeetingType {
+        let lower = title.lowercased()
+        let patterns = ["1:1", "1-1", "one to one", "one-to-one", "1 to 1", "1 on 1", "one on one"]
+        return patterns.contains(where: { lower.contains($0) }) ? .oneOnOne : .group
+    }
+}
+
 public struct Meeting: Codable, Identifiable, Hashable, Sendable {
     public let id: UUID
     public var title: String
@@ -44,7 +57,14 @@ public struct Meeting: Codable, Identifiable, Hashable, Sendable {
     public var meetingPlatform: MeetingPlatform?
     public var calendarTitle: String?           // event title at creation; preserved if user renames the meeting
 
-    public static let currentSchemaVersion = 2
+    // Schema v3 (2026-05): meeting metadata enrichment. All optional → v2 files
+    // decode unchanged and are upgraded lazily on next write.
+    public var meetingType: MeetingType?
+    public var labels: [String]?
+    public var attendees: [String]?
+    public var org: String?
+
+    public static let currentSchemaVersion = 3
 
     public init(
         id: UUID = UUID(),
@@ -65,7 +85,11 @@ public struct Meeting: Codable, Identifiable, Hashable, Sendable {
         calendarEventID: String? = nil,
         calendarSeriesID: String? = nil,
         meetingPlatform: MeetingPlatform? = nil,
-        calendarTitle: String? = nil
+        calendarTitle: String? = nil,
+        meetingType: MeetingType? = nil,
+        labels: [String]? = nil,
+        attendees: [String]? = nil,
+        org: String? = nil
     ) {
         self.id = id
         self.title = title
@@ -86,10 +110,37 @@ public struct Meeting: Codable, Identifiable, Hashable, Sendable {
         self.calendarSeriesID = calendarSeriesID
         self.meetingPlatform = meetingPlatform
         self.calendarTitle = calendarTitle
+        self.meetingType = meetingType
+        self.labels = labels
+        self.attendees = attendees
+        self.org = org
     }
 
     public var duration: TimeInterval? {
         guard let endedAt else { return nil }
         return endedAt.timeIntervalSince(startedAt)
+    }
+
+    /// The resolved meeting type, falling back to auto-detection from title.
+    public var resolvedType: MeetingType {
+        meetingType ?? MeetingType.detect(from: title)
+    }
+
+    /// For 1:1 meetings, the other person's name (first attendee that isn't "You").
+    /// Returns nil for group meetings or when no attendees are set.
+    public var person: String? {
+        guard resolvedType == .oneOnOne else { return nil }
+        return attendees?.first(where: { $0.lowercased() != "you" }) ?? attendees?.first
+    }
+
+    /// Tags auto-computed from labels + system tags. Used for transcript.md front-matter.
+    public var computedTags: [String] {
+        var result = labels ?? []
+        result.append("meeting")
+        result.append("transcript")
+        result.append(resolvedType.rawValue)
+        // Deduplicate while preserving order.
+        var seen = Set<String>()
+        return result.filter { seen.insert($0).inserted }
     }
 }

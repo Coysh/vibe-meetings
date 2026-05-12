@@ -71,7 +71,8 @@ public final class OpenAIEngine: SummarizationEngine, @unchecked Sendable {
         meeting: Meeting,
         modelId: String,
         style: SummaryStyle,
-        userNotes: String? = nil
+        userNotes: String? = nil,
+        customPrompt: String? = nil
     ) -> AsyncThrowingStream<String, Error> {
         AsyncThrowingStream { continuation in
             let task = Task {
@@ -79,8 +80,8 @@ public final class OpenAIEngine: SummarizationEngine, @unchecked Sendable {
                     let speakerNames = Dictionary(
                         uniqueKeysWithValues: meeting.participants.map { ($0.id, $0.displayName) }
                     )
-                    let body = PromptLoader.renderTranscript(transcript, speakerNames: speakerNames, userNotes: userNotes)
-                    let system = PromptLoader.systemPrompt(style: style, bundle: self.promptBundle)
+                    let body = PromptLoader.renderTranscript(transcript, speakerNames: speakerNames, meeting: meeting, userNotes: userNotes)
+                    let system = PromptLoader.systemPrompt(style: style, bundle: self.promptBundle, customPrompt: customPrompt)
 
                     let chatReq = OpenAIChatRequest(
                         model: modelId,
@@ -89,7 +90,7 @@ public final class OpenAIEngine: SummarizationEngine, @unchecked Sendable {
                             .init(role: "user", content: body)
                         ],
                         stream: true,
-                        temperature: 0.2
+                        temperature: nil
                     )
 
                     let encodedBody = try JSONEncoder().encode(chatReq)
@@ -137,7 +138,16 @@ public final class OpenAIEngine: SummarizationEngine, @unchecked Sendable {
                             attempt += 1
                             continue
                         } else {
-                            print("[OpenAI] request failed with HTTP \(http.statusCode)")
+                            // Read the error body for a more descriptive message.
+                            var errorBody = ""
+                            for try await line in bytes.lines {
+                                errorBody += line
+                                if errorBody.count > 500 { break }
+                            }
+                            print("[OpenAI] request failed with HTTP \(http.statusCode): \(errorBody)")
+                            if http.statusCode == 400 {
+                                throw SummarizationEngineError.requestFailed("OpenAI rejected the request (model=\(modelId)). Check the model name in Settings > Engines. Error: \(errorBody)")
+                            }
                             throw SummarizationEngineError.requestFailed("OpenAI returned HTTP \(http.statusCode)")
                         }
                     }

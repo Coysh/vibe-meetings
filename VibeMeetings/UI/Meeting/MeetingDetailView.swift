@@ -11,12 +11,22 @@ struct MeetingDetailView: View {
     @State private var summary: String = ""
     @State private var notes: String = ""
     @State private var selectedTab: Tab = .transcript
-    @State private var isSummarizing = false
-    @State private var summarizationError: String?
+    @State private var showingMetadataEditor = false
+    @State private var editableMeeting: Meeting?
 
     enum Tab: String, CaseIterable, Identifiable {
         case transcript, notes, summary, audio
         var id: String { rawValue }
+    }
+
+    /// The background summary job for this meeting, if any.
+    private var summaryJob: SummaryJob? {
+        env.summaryService.job(for: meetingID)
+    }
+
+    /// Whether a summary is currently being generated.
+    private var isSummarizing: Bool {
+        env.summaryService.isRunning(for: meetingID)
     }
 
     /// When the active recording targets this meeting, show live segments
@@ -74,7 +84,22 @@ struct MeetingDetailView: View {
         VStack(alignment: .leading, spacing: 4) {
             HStack {
                 VStack(alignment: .leading, spacing: 4) {
-                    Text(meeting.title).font(.title2).bold()
+                    HStack(spacing: 8) {
+                        Text(meeting.title).font(.title2).bold()
+                        // Meeting type badge
+                        Text(meeting.resolvedType == .oneOnOne ? "1:1" : "Group")
+                            .font(.caption2.bold())
+                            .padding(.horizontal, 6)
+                            .padding(.vertical, 2)
+                            .background(
+                                meeting.resolvedType == .oneOnOne
+                                    ? Color.blue.opacity(0.15)
+                                    : Color.green.opacity(0.15),
+                                in: Capsule()
+                            )
+                            .foregroundStyle(meeting.resolvedType == .oneOnOne ? .blue : .green)
+                    }
+
                     HStack(spacing: 16) {
                         Label(meeting.startedAt.formatted(date: .abbreviated, time: .shortened), systemImage: "calendar")
                         if let dur = meeting.duration {
@@ -85,8 +110,37 @@ struct MeetingDetailView: View {
                     }
                     .font(.caption)
                     .foregroundStyle(.secondary)
+
+                    // Metadata row: org, attendees, labels
+                    metadataRow(meeting: meeting)
                 }
                 Spacer()
+
+                // Edit metadata button
+                Button {
+                    editableMeeting = meeting
+                    showingMetadataEditor = true
+                } label: {
+                    Image(systemName: "pencil.circle")
+                }
+                .buttonStyle(.bordered)
+                .popover(isPresented: $showingMetadataEditor) {
+                    if var editable = editableMeeting {
+                        MeetingMetadataEditor(
+                            meeting: Binding(
+                                get: { editable },
+                                set: { editable = $0 }
+                            ),
+                            onSave: { updated in
+                                Task {
+                                    try? await env.meetingStore.updateMeeting(updated)
+                                    await load()
+                                }
+                            }
+                        )
+                    }
+                }
+
                 // Show Resume button when meeting has ended and no other recording is active.
                 if meeting.endedAt != nil && env.activeRecordingController == nil {
                     Button {
@@ -101,6 +155,27 @@ struct MeetingDetailView: View {
         }
         .frame(maxWidth: .infinity, alignment: .leading)
         .padding()
+    }
+
+    @ViewBuilder
+    private func metadataRow(meeting: Meeting) -> some View {
+        let parts: [String] = {
+            var items: [String] = []
+            if let org = meeting.org { items.append("Org: \(org)") }
+            if let attendees = meeting.attendees, !attendees.isEmpty {
+                items.append(attendees.joined(separator: ", "))
+            }
+            if let labels = meeting.labels, !labels.isEmpty {
+                items.append(labels.map { "#\($0)" }.joined(separator: " "))
+            }
+            return items
+        }()
+
+        if !parts.isEmpty {
+            Text(parts.joined(separator: "  ·  "))
+                .font(.caption)
+                .foregroundStyle(.tertiary)
+        }
     }
 
     /// Notes taken by the user during or after the meeting. Editable and auto-saved.
@@ -136,7 +211,10 @@ struct MeetingDetailView: View {
 
     @ViewBuilder
     private func summaryTab(meeting: Meeting) -> some View {
-        if summary.isEmpty && !isSummarizing {
+        let displaySummary = summaryJob?.partialSummary ?? summary
+        let jobError = summaryJob?.error
+
+        if displaySummary.isEmpty && !isSummarizing {
             VStack(spacing: 16) {
                 Spacer()
                 Image(systemName: "text.document")
@@ -145,7 +223,7 @@ struct MeetingDetailView: View {
                 Text("No summary yet")
                     .font(.headline)
                     .foregroundStyle(.secondary)
-                if let error = summarizationError {
+                if let error = jobError {
                     Text(error)
                         .font(.caption)
                         .foregroundStyle(.red)
@@ -153,7 +231,7 @@ struct MeetingDetailView: View {
                         .padding(.horizontal)
                 }
                 Button {
-                    Task { await generateSummary(meeting: meeting) }
+                    generateSummary(meeting: meeting)
                 } label: {
                     Label("Generate Summary", systemImage: "sparkles")
                 }
@@ -170,21 +248,21 @@ struct MeetingDetailView: View {
         } else if isSummarizing {
             VStack(spacing: 12) {
                 ProgressView()
-                Text("Generating summary…")
+                Text(summaryJob?.progressText ?? "Generating summary…")
                     .foregroundStyle(.secondary)
-                if !summary.isEmpty {
-                    SummaryView(markdown: summary)
+                if !displaySummary.isEmpty {
+                    SummaryView(markdown: displaySummary)
                 }
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity)
         } else {
             VStack(spacing: 0) {
-                SummaryView(markdown: summary)
+                SummaryView(markdown: displaySummary)
                 Divider()
                 HStack {
                     Spacer()
                     Button {
-                        Task { await generateSummary(meeting: meeting) }
+                        generateSummary(meeting: meeting)
                     } label: {
                         Label("Regenerate", systemImage: "arrow.clockwise")
                     }
@@ -192,42 +270,40 @@ struct MeetingDetailView: View {
                     .padding(8)
                 }
             }
+            .onAppear {
+                // If the job completed while we were away, sync the persisted summary.
+                if let job = summaryJob, case .completed = job.status, !job.partialSummary.isEmpty {
+                    summary = job.partialSummary
+                    env.summaryService.clearJob(for: meetingID)
+                }
+            }
         }
     }
 
-    private func generateSummary(meeting: Meeting) async {
-        isSummarizing = true
-        summarizationError = nil
-        summary = ""
-
+    private func generateSummary(meeting: Meeting) {
         let segs = displaySegments
-        guard !segs.isEmpty else {
-            isSummarizing = false
-            return
-        }
+        guard !segs.isEmpty else { return }
 
-        do {
-            let modelId = env.activeSummarizationKind == OpenAIEngine.kind
-                ? env.selectedOpenAIModelId
-                : env.selectedOllamaModelId
-            let meetingNotes = notes.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? nil : notes
-            let stream = env.summarizationEngine.summarize(
-                transcript: segs,
-                meeting: meeting,
-                modelId: modelId,
-                style: .standard,
-                userNotes: meetingNotes
-            )
-            for try await chunk in stream {
-                summary += chunk
-            }
-            // Persist the completed summary.
-            try? await env.meetingStore.writeSummary(summary, for: meetingID)
-        } catch {
-            summarizationError = error.localizedDescription
-        }
+        let modelId = env.activeSummarizationKind == OpenAIEngine.kind
+            ? env.selectedOpenAIModelId
+            : env.selectedOllamaModelId
+        let meetingNotes = notes.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? nil : notes
+        let prompt = env.customSystemPrompt.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+            ? nil : env.customSystemPrompt
 
-        isSummarizing = false
+        summary = "" // Clear local summary so the job's partial output takes over.
+
+        env.summaryService.generate(
+            meetingID: meetingID,
+            meetingTitle: meeting.title,
+            segments: segs,
+            meeting: meeting,
+            engine: env.summarizationEngine,
+            modelId: modelId,
+            userNotes: meetingNotes,
+            customPrompt: prompt,
+            store: env.meetingStore
+        )
     }
 
     private func resumeRecording() async {

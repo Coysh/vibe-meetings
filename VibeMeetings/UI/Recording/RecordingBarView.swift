@@ -77,26 +77,11 @@ final class RecordingController {
         //    The privacy badge flips to yellow during the download.
         state = .preparing
         let modelId = env.selectedModelId
-        env.privacyState = .downloadingModel(progress: 0)
         do {
-            try await env.activeTranscriptionEngine.loadModel(id: modelId) { p in
-                Task { @MainActor in
-                    self.env.privacyState = .downloadingModel(progress: p)
-                }
-            }
+            try await env.activeTranscriptionEngine.loadModel(id: modelId) { _ in }
         } catch {
             state = .error("Could not load model \(modelId): \(error.localizedDescription)")
-            env.privacyState = .localOnly
             return
-        }
-        // Reset privacy badge to reflect the active summarization engine.
-        if env.activeSummarizationKind == OpenAIEngine.kind {
-            env.privacyState = .cloud(provider: "OpenAI")
-        } else if let host = env.ollamaBaseURL.host,
-                  !LocalhostOnlySession.isLoopback(host) {
-            env.privacyState = .lan(host: host)
-        } else {
-            env.privacyState = .localOnly
         }
 
         // 2. Start audio capture.

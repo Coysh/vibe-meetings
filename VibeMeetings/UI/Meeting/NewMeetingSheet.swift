@@ -159,6 +159,30 @@ struct NewMeetingSheet: View {
                 startedAt = max(Date(), ev.startDate)
             }
 
+            // Extract metadata from calendar event if applicable.
+            var attendees: [String]?
+            var meetingType: MeetingType?
+            var org: String?
+
+            if case .event(let id) = selection,
+               let ev = todaysEvents.first(where: { $0.id == id }) {
+                if !ev.attendeeNames.isEmpty {
+                    attendees = ev.attendeeNames
+                }
+                // Infer org from calendar title (strip common suffixes like " Calendar").
+                let calTitle = ev.calendarTitle
+                let genericNames = ["calendar", "work", "personal", "home", "other"]
+                let cleaned = calTitle
+                    .replacingOccurrences(of: " Calendar", with: "")
+                    .trimmingCharacters(in: .whitespacesAndNewlines)
+                if !cleaned.isEmpty && !genericNames.contains(cleaned.lowercased()) {
+                    org = cleaned
+                }
+            }
+
+            // Auto-detect meeting type from title.
+            meetingType = MeetingType.detect(from: title)
+
             let draft = MeetingDraft(
                 title: title,
                 startedAt: startedAt,
@@ -167,13 +191,21 @@ struct NewMeetingSheet: View {
                 modelId: env.selectedModelId,
                 calendarEventID: eventID,
                 calendarSeriesID: seriesID,
-                meetingPlatform: platform
+                meetingPlatform: platform,
+                meetingType: meetingType,
+                attendees: attendees,
+                org: org
             )
 
+            // Folder routing: series folder → person folder (for 1:1s) → parentFolder.
             let target: FolderNode
             if let sid = seriesID,
                let existing = await env.meetingStore.folderForSeries(sid) {
                 target = existing
+            } else if meetingType == .oneOnOne,
+                      let personName = attendees?.first(where: { $0.lowercased() != "you" }) ?? attendees?.first,
+                      let personFolder = await env.meetingStore.folderForPerson(personName) {
+                target = personFolder
             } else {
                 target = parentFolder
             }

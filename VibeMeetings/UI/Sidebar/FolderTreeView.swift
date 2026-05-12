@@ -7,12 +7,13 @@ import VMCore
 /// context menu for create-subfolder / rename / delete.
 struct FolderTreeView: View {
     let root: FolderNode?
-    @Binding var selection: SidebarSelection?
+    @Binding var selection: Set<SidebarSelection>
     @Environment(AppEnvironment.self) private var env
 
     @State private var newFolderTarget: FolderNode?
     @State private var renameTarget: RenameTarget?
     @State private var deleteTarget: DeleteTarget?
+    @State private var bulkDeleteItems: [BulkDeleteItem]?
 
     var body: some View {
         Group {
@@ -81,7 +82,15 @@ struct FolderTreeView: View {
                     title: Text("Delete \"\(node.name)\"?"),
                     message: Text("This folder and any meetings inside it will be moved to the Trash."),
                     primaryButton: .destructive(Text("Move to Trash")) {
-                        Task { try? await env.meetingStore.deleteFolder(node) }
+                        Task {
+                            do {
+                                try await env.meetingStore.deleteFolder(node)
+                            } catch {
+                                print("[Delete] failed to delete folder \(node.name): \(error)")
+                            }
+                            selection.remove(.folder(node.url))
+                            await env.refreshFolderTree()
+                        }
                     },
                     secondaryButton: .cancel()
                 )
@@ -91,7 +100,15 @@ struct FolderTreeView: View {
                         title: Text("Delete \"\(title)\"?"),
                         message: Text("Move the meeting (including its audio) to the Trash?"),
                         primaryButton: .destructive(Text("Delete with audio")) {
-                            Task { try? await env.meetingStore.deleteMeeting(id: id, deleteAudio: true) }
+                            Task {
+                                do {
+                                    try await env.meetingStore.deleteMeeting(id: id, deleteAudio: true)
+                                } catch {
+                                    print("[Delete] failed to delete meeting \(id): \(error)")
+                                }
+                                selection.remove(.meeting(id))
+                                await env.refreshFolderTree()
+                            }
                         },
                         secondaryButton: .cancel()
                     )
@@ -100,12 +117,58 @@ struct FolderTreeView: View {
                         title: Text("Delete \"\(title)\"?"),
                         message: Text("This meeting will be moved to the Trash."),
                         primaryButton: .destructive(Text("Move to Trash")) {
-                            Task { try? await env.meetingStore.deleteMeeting(id: id, deleteAudio: false) }
+                            Task {
+                                do {
+                                    try await env.meetingStore.deleteMeeting(id: id, deleteAudio: false)
+                                } catch {
+                                    print("[Delete] failed to delete meeting \(id): \(error)")
+                                }
+                                selection.remove(.meeting(id))
+                                await env.refreshFolderTree()
+                            }
                         },
                         secondaryButton: .cancel()
                     )
                 }
             }
+        }
+        .alert(
+            "Delete \(bulkDeleteItems?.count ?? 0) items?",
+            isPresented: Binding(
+                get: { bulkDeleteItems != nil },
+                set: { if !$0 { bulkDeleteItems = nil } }
+            )
+        ) {
+            Button("Move to Trash", role: .destructive) {
+                guard let items = bulkDeleteItems else { return }
+                Task {
+                    for item in items {
+                        switch item {
+                        case .folder(let node):
+                            try? await env.meetingStore.deleteFolder(node)
+                        case .meeting(let id):
+                            try? await env.meetingStore.deleteMeeting(id: id, deleteAudio: true)
+                        }
+                    }
+                    selection.removeAll()
+                    await env.refreshFolderTree()
+                }
+            }
+            Button("Cancel", role: .cancel) { bulkDeleteItems = nil }
+        } message: {
+            if let items = bulkDeleteItems {
+                let meetings = items.filter { if case .meeting = $0 { return true }; return false }.count
+                let folders = items.filter { if case .folder = $0 { return true }; return false }.count
+                let parts = [
+                    meetings > 0 ? "\(meetings) meeting\(meetings == 1 ? "" : "s")" : nil,
+                    folders > 0 ? "\(folders) folder\(folders == 1 ? "" : "s")" : nil
+                ].compactMap { $0 }.joined(separator: " and ")
+                Text("Move \(parts) to the Trash? This cannot be undone.")
+            }
+        }
+        .onDeleteCommand {
+            guard !selection.isEmpty else { return }
+            requestBulkDelete()
         }
     }
 
@@ -185,7 +248,8 @@ struct FolderTreeView: View {
     ///   - Else the root.
     private func currentFolder() -> FolderNode? {
         guard let root else { return nil }
-        switch selection {
+        guard let sel = selection.single else { return nil }
+        switch sel {
         case .folder(let url):
             return findNode(at: url, in: root)
         case .meeting(let id):
@@ -193,8 +257,37 @@ struct FolderTreeView: View {
                 return findParent(of: meetingNode, in: root)
             }
             return nil
-        case nil:
-            return nil
+        }
+    }
+
+    /// Build bulk-delete items from the current selection and present the
+    /// confirmation alert.
+    private func requestBulkDelete() {
+        guard let root else { return }
+        var items: [BulkDeleteItem] = []
+        for sel in selection {
+            switch sel {
+            case .folder(let url):
+                if let node = findNode(at: url, in: root) {
+                    items.append(.folder(node))
+                }
+            case .meeting(let id):
+                items.append(.meeting(id: id))
+            }
+        }
+        guard !items.isEmpty else { return }
+        bulkDeleteItems = items
+    }
+}
+
+enum BulkDeleteItem: Identifiable {
+    case folder(FolderNode)
+    case meeting(id: UUID)
+
+    var id: String {
+        switch self {
+        case .folder(let n): return "folder:\(n.id)"
+        case .meeting(let id): return "meeting:\(id)"
         }
     }
 }

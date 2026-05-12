@@ -7,6 +7,7 @@ public actor FilesystemMeetingStore: MeetingStore {
     private var cachedTree: FolderNode
     private var meetingIndex: [UUID: URL] = [:]
     private var seriesIndex: [String: URL] = [:]   // calendarSeriesID → parent folder URL
+    private var personIndex: [String: URL] = [:]   // lowercased person name → parent folder URL
     private var watcher: FolderWatcher?
     private var subscribers: [UUID: AsyncStream<FolderNode>.Continuation] = [:]
 
@@ -16,9 +17,17 @@ public actor FilesystemMeetingStore: MeetingStore {
             try fm.createDirectory(at: rootURL, withIntermediateDirectories: true)
         }
         self.rootURL = rootURL
+
+        // Auto-import bare .md files with YAML front-matter on first scan.
+        let imported = FolderTreeScanner.importBareMarkdownFiles(in: rootURL)
+        if imported > 0 {
+            print("[MeetingStore] Imported \(imported) bare markdown file(s) as meetings")
+        }
+
         self.cachedTree = FolderTreeScanner.scan(root: rootURL)
         self.meetingIndex = FolderTreeScanner.indexMeetings(in: self.cachedTree)
         self.seriesIndex = FolderTreeScanner.indexSeries(in: self.cachedTree)
+        self.personIndex = FolderTreeScanner.indexPersonFolders(in: self.cachedTree)
         Task { await self.startWatching() }
     }
 
@@ -55,11 +64,17 @@ public actor FilesystemMeetingStore: MeetingStore {
         cachedTree = FolderTreeScanner.scan(root: rootURL)
         meetingIndex = FolderTreeScanner.indexMeetings(in: cachedTree)
         seriesIndex = FolderTreeScanner.indexSeries(in: cachedTree)
+        personIndex = FolderTreeScanner.indexPersonFolders(in: cachedTree)
         for (_, c) in subscribers { c.yield(cachedTree) }
     }
 
     public func folderForSeries(_ seriesID: String) async -> FolderNode? {
         guard let url = seriesIndex[seriesID] else { return nil }
+        return findNode(at: url, in: cachedTree)
+    }
+
+    public func folderForPerson(_ name: String) async -> FolderNode? {
+        guard let url = personIndex[name.lowercased()] else { return nil }
         return findNode(at: url, in: cachedTree)
     }
 
@@ -93,7 +108,11 @@ public actor FilesystemMeetingStore: MeetingStore {
             calendarEventID: draft.calendarEventID,
             calendarSeriesID: draft.calendarSeriesID,
             meetingPlatform: draft.meetingPlatform,
-            calendarTitle: draft.calendarSeriesID != nil ? draft.title : nil
+            calendarTitle: draft.calendarSeriesID != nil ? draft.title : nil,
+            meetingType: draft.meetingType,
+            labels: draft.labels,
+            attendees: draft.attendees,
+            org: draft.org
         )
 
         try AtomicWriter.createDirectory(at: meetingURL) { tmp in
@@ -142,6 +161,27 @@ public actor FilesystemMeetingStore: MeetingStore {
         let dest = uniqueURL(parent: folder.url, base: url.lastPathComponent)
         try FileManager.default.moveItem(at: url, to: dest)
         meetingIndex[id] = dest
+        broadcast()
+    }
+
+    public func updateMeeting(_ meeting: Meeting) async throws {
+        guard let url = meetingIndex[meeting.id] else {
+            throw MeetingStoreError.meetingNotFound(meeting.id)
+        }
+        let mf = MeetingFolder(url: url)
+        try FolderTreeScanner.writeMeeting(meeting, to: mf.metadataURL)
+
+        // Re-render transcript.md with current summary + notes content.
+        let segments = try SegmentsFile.load(from: mf.segmentsURL)
+        let summary = loadBodyIfExists(mf.summaryURL)
+        let notes = loadBodyIfExists(mf.notesURL)
+        let md = MarkdownTranscriptWriter.render(
+            meeting: meeting,
+            segments: segments,
+            summary: summary,
+            notes: notes
+        )
+        try AtomicWriter.write(Data(md.utf8), to: mf.transcriptURL)
         broadcast()
     }
 
@@ -199,7 +239,9 @@ public actor FilesystemMeetingStore: MeetingStore {
         existing.append(contentsOf: segs.filter { !$0.isPartial })
         try SegmentsFile.save(existing, to: mf.segmentsURL)
         let meeting = try FolderTreeScanner.loadMeeting(from: mf.metadataURL)
-        let md = MarkdownTranscriptWriter.render(meeting: meeting, segments: existing)
+        let summary = loadBodyIfExists(mf.summaryURL)
+        let notes = loadBodyIfExists(mf.notesURL)
+        let md = MarkdownTranscriptWriter.render(meeting: meeting, segments: existing, summary: summary, notes: notes)
         try AtomicWriter.write(Data(md.utf8), to: mf.transcriptURL)
     }
 
@@ -209,7 +251,9 @@ public actor FilesystemMeetingStore: MeetingStore {
         let finals = segs.filter { !$0.isPartial }
         try SegmentsFile.save(finals, to: mf.segmentsURL)
         let meeting = try FolderTreeScanner.loadMeeting(from: mf.metadataURL)
-        let md = MarkdownTranscriptWriter.render(meeting: meeting, segments: finals)
+        let summary = loadBodyIfExists(mf.summaryURL)
+        let notes = loadBodyIfExists(mf.notesURL)
+        let md = MarkdownTranscriptWriter.render(meeting: meeting, segments: finals, summary: summary, notes: notes)
         try AtomicWriter.write(Data(md.utf8), to: mf.transcriptURL)
     }
 
@@ -285,5 +329,11 @@ public actor FilesystemMeetingStore: MeetingStore {
             .reduce("") { $0 + String($1) }
         if out.hasPrefix(".") { out.removeFirst() }
         return out
+    }
+
+    /// Returns file content as a String if the file exists, nil otherwise.
+    private func loadBodyIfExists(_ url: URL) -> String? {
+        guard FileManager.default.fileExists(atPath: url.path) else { return nil }
+        return try? String(contentsOf: url, encoding: .utf8)
     }
 }

@@ -55,16 +55,11 @@ struct ModelDownloadView: View {
 
     private func downloadModel(id: String) async {
         loading = true
-        env.privacyState = .downloadingModel(progress: 0)
-        defer {
-            loading = false
-            env.privacyState = .localOnly
-        }
+        defer { loading = false }
         do {
             try await env.activeTranscriptionEngine.loadModel(id: id) { p in
                 Task { @MainActor in
                     progress = p
-                    env.privacyState = .downloadingModel(progress: p)
                 }
             }
             await refresh()

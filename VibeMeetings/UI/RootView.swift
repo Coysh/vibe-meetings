@@ -4,9 +4,10 @@ import VMStorage
 
 struct RootView: View {
     @Environment(AppEnvironment.self) private var env
-    @State private var selection: SidebarSelection?
+    @State private var selection: Set<SidebarSelection> = []
     @State private var newMeetingSheet = false
     @State private var preselectedEventID: String?
+    @State private var showTriageSheet = false
 
     var body: some View {
         NavigationSplitView {
@@ -23,7 +24,7 @@ struct RootView: View {
                     Divider()
                 }
                 Group {
-                    if let id = selection?.meetingID {
+                    if let id = selection.firstMeetingID {
                         MeetingDetailView(meetingID: id)
                             .id(id)
                     } else {
@@ -63,6 +64,9 @@ struct RootView: View {
                             onKeep: { env.bannerCoordinator.dismissMeetingEnd() }
                         )
                     }
+                    if let update = env.updateChecker.availableUpdate {
+                        UpdateBanner(release: update, onDismiss: { env.updateChecker.dismissUpdate() })
+                    }
                 }
             }
         }
@@ -75,19 +79,28 @@ struct RootView: View {
                 env.activeRecordingController?.linkedCalendarEvent
             }
             env.bannerCoordinator.start()
+            await env.updateChecker.checkForUpdates()
             for await tree in env.meetingStore.tree {
                 env.folderTree = tree
             }
         }
         .toolbar {
-            ToolbarItem(placement: .navigation) {
-                PrivacyBadgeView()
+            ToolbarItem(placement: .primaryAction) {
+                Button {
+                    showTriageSheet = true
+                } label: {
+                    Label("Organise", systemImage: "tray.full")
+                }
+                .help("Organise untagged meetings")
             }
+        }
+        .sheet(isPresented: $showTriageSheet) {
+            MeetingTriageView()
         }
         .sheet(isPresented: $newMeetingSheet, onDismiss: { preselectedEventID = nil }) {
             if let parent = resolvedParentForNewMeeting() {
                 NewMeetingSheet(parentFolder: parent, preselectedEventID: preselectedEventID) { handle in
-                    selection = .meeting(handle.meeting.id)
+                    selection = [.meeting(handle.meeting.id)]
                     let c = RecordingController(env: env)
                     env.activeRecordingController = c
                     env.bannerCoordinator.recordingDidStart()
@@ -105,7 +118,8 @@ struct RootView: View {
     /// or root.
     private func resolvedParentForNewMeeting() -> FolderNode? {
         guard let root = env.folderTree else { return nil }
-        switch selection {
+        guard let sel = selection.single else { return root }
+        switch sel {
         case .folder(let url):
             return findNode(at: url, in: root) ?? root
         case .meeting(let id):
@@ -113,8 +127,6 @@ struct RootView: View {
                let parent = findParent(of: m, in: root) {
                 return parent
             }
-            return root
-        case nil:
             return root
         }
     }
@@ -157,49 +169,33 @@ private struct EmptyDetailView: View {
     }
 }
 
-struct PrivacyBadgeView: View {
-    @Environment(AppEnvironment.self) private var env
+struct UpdateBanner: View {
+    let release: UpdateChecker.GitHubRelease
+    let onDismiss: () -> Void
 
     var body: some View {
-        HStack(spacing: 6) {
-            Circle()
-                .fill(color)
-                .frame(width: 8, height: 8)
-            Text(label)
-                .font(.caption)
-                .foregroundStyle(.secondary)
+        HStack(spacing: 12) {
+            Image(systemName: "arrow.down.app.fill")
+                .foregroundStyle(.blue)
+            VStack(alignment: .leading, spacing: 2) {
+                Text("Update available: v\(release.version)")
+                    .font(.callout.bold())
+                if !release.body.isEmpty {
+                    Text(release.body.prefix(120) + (release.body.count > 120 ? "…" : ""))
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .lineLimit(2)
+                }
+            }
+            Spacer()
+            Link("Download", destination: release.htmlURL)
+                .buttonStyle(.borderedProminent)
+                .controlSize(.small)
+            Button("Dismiss", action: onDismiss)
+                .controlSize(.small)
         }
-        .help(helpText)
-    }
-
-    private var color: Color {
-        switch env.privacyState {
-        case .localOnly: return .green
-        case .lan: return .blue
-        case .cloud: return .orange
-        case .downloadingModel: return .yellow
-        }
-    }
-
-    private var label: String {
-        switch env.privacyState {
-        case .localOnly: return "Local-only"
-        case .lan(let host): return "LAN: \(host)"
-        case .cloud(let provider): return "Cloud: \(provider)"
-        case .downloadingModel(let p): return "Downloading model — \(Int(p * 100))%"
-        }
-    }
-
-    private var helpText: String {
-        switch env.privacyState {
-        case .localOnly:
-            return "Everything stays on this Mac. The app never sends data to the cloud."
-        case .lan(let host):
-            return "Audio and transcripts stay on this Mac. Summaries are generated by your self-hosted Ollama at \(host)."
-        case .cloud(let provider):
-            return "Audio and transcripts stay on this Mac. Summaries are sent to \(provider) for processing."
-        case .downloadingModel:
-            return "Downloading a transcription model. The download is the only outbound traffic right now."
-        }
+        .padding(.horizontal, 16)
+        .padding(.vertical, 10)
+        .background(.blue.opacity(0.08))
     }
 }

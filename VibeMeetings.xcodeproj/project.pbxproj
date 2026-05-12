@@ -21,6 +21,10 @@
 		4DFF5E1860DA6ED91537024A /* SettingsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7F03C68772C3A761B5F27E12 /* SettingsView.swift */; };
 		4FE233302FB20C8E006F29C4 /* MicActiveBanner.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4FE2332F2FB20C8D006F29C4 /* MicActiveBanner.swift */; };
 		4FE233322FB20C94006F29C4 /* MeetingEndBanner.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4FE233312FB20C94006F29C4 /* MeetingEndBanner.swift */; };
+		4FE233342FB22E7F006F29C4 /* SummaryGenerationService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4FE233332FB22E7F006F29C4 /* SummaryGenerationService.swift */; };
+		4FE233362FB22ECD006F29C4 /* MeetingMetadataEditor.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4FE233352FB22ECD006F29C4 /* MeetingMetadataEditor.swift */; };
+		4FE233382FB233D9006F29C4 /* MeetingTriageView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4FE233372FB233D9006F29C4 /* MeetingTriageView.swift */; };
+		4FE2333B2FB2A3A4006F29C4 /* UpdateChecker.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4FE2333A2FB2A3A4006F29C4 /* UpdateChecker.swift */; };
 		5B07BADDE5CEF68FC35314DF /* action_items.system.md in Resources */ = {isa = PBXBuildFile; fileRef = 7EA62E384045395DD13967F1 /* action_items.system.md */; };
 		655737F486FFA44CD6422CD7 /* BannerCoordinator.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3CF900D4A92FEED161ADB88F /* BannerCoordinator.swift */; };
 		676EB16AF871EDC219B9033D /* AppEnvironment.swift in Sources */ = {isa = PBXBuildFile; fileRef = 61ABE7DA1EBB9CB5CFE4071D /* AppEnvironment.swift */; };
@@ -51,6 +55,10 @@
 		4757B8F5683B1C700A160B7E /* CalendarSettingsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CalendarSettingsView.swift; sourceTree = "<group>"; };
 		4FE2332F2FB20C8D006F29C4 /* MicActiveBanner.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MicActiveBanner.swift; sourceTree = "<group>"; };
 		4FE233312FB20C94006F29C4 /* MeetingEndBanner.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MeetingEndBanner.swift; sourceTree = "<group>"; };
+		4FE233332FB22E7F006F29C4 /* SummaryGenerationService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SummaryGenerationService.swift; sourceTree = "<group>"; };
+		4FE233352FB22ECD006F29C4 /* MeetingMetadataEditor.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MeetingMetadataEditor.swift; sourceTree = "<group>"; };
+		4FE233372FB233D9006F29C4 /* MeetingTriageView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MeetingTriageView.swift; sourceTree = "<group>"; };
+		4FE2333A2FB2A3A4006F29C4 /* UpdateChecker.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = UpdateChecker.swift; sourceTree = "<group>"; };
 		51363BA47624D8F309024000 /* summary.system.md */ = {isa = PBXFileReference; lastKnownFileType = net.daringfireball.markdown; path = summary.system.md; sourceTree = "<group>"; };
 		517E4CDC8AC52F6A615E4F1D /* VMCore */ = {isa = PBXFileReference; lastKnownFileType = folder; name = VMCore; path = Packages/VMCore; sourceTree = SOURCE_ROOT; };
 		5288619DADA1D5DC87A38FE4 /* AudioPlaybackView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AudioPlaybackView.swift; sourceTree = "<group>"; };
@@ -112,6 +120,14 @@
 			path = Resources;
 			sourceTree = "<group>";
 		};
+		4FE233392FB27646006F29C4 /* Services */ = {
+			isa = PBXGroup;
+			children = (
+				4FE2333A2FB2A3A4006F29C4 /* UpdateChecker.swift */,
+			);
+			path = Services;
+			sourceTree = "<group>";
+		};
 		76DAF097AB3E73F47F6238C5 /* Settings */ = {
 			isa = PBXGroup;
 			children = (
@@ -153,6 +169,8 @@
 				CEC0B8DF95891510E676EC9F /* NewMeetingSheet.swift */,
 				C3F92A977DE107A995153948 /* SummaryView.swift */,
 				383C34E75274AB27C5FEEB40 /* TranscriptView.swift */,
+				4FE233352FB22ECD006F29C4 /* MeetingMetadataEditor.swift */,
+				4FE233372FB233D9006F29C4 /* MeetingTriageView.swift */,
 			);
 			path = Meeting;
 			sourceTree = "<group>";
@@ -222,6 +240,8 @@
 				A81AF7B10E393D7477246702 /* Preview Content */,
 				4C2D86A06D6389D0641AE072 /* Resources */,
 				9D2C709ECDB571EC6DD74D53 /* UI */,
+				4FE233332FB22E7F006F29C4 /* SummaryGenerationService.swift */,
+				4FE233392FB27646006F29C4 /* Services */,
 			);
 			path = VibeMeetings;
 			sourceTree = "<group>";
@@ -314,12 +334,14 @@
 			isa = PBXSourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				4FE2333B2FB2A3A4006F29C4 /* UpdateChecker.swift in Sources */,
 				676EB16AF871EDC219B9033D /* AppEnvironment.swift in Sources */,
 				D2233B040A885F22FD2A2ACD /* AudioPlaybackView.swift in Sources */,
 				655737F486FFA44CD6422CD7 /* BannerCoordinator.swift in Sources */,
 				0A4048BC3077756B43E64C5C /* CalendarAccessView.swift in Sources */,
 				4FE233322FB20C94006F29C4 /* MeetingEndBanner.swift in Sources */,
 				2DFACC0EBC269755DAC6E048 /* CalendarSettingsView.swift in Sources */,
+				4FE233342FB22E7F006F29C4 /* SummaryGenerationService.swift in Sources */,
 				2B328E480C6222351A847A2D /* FolderTreeView.swift in Sources */,
 				96E163FEDE0D952716940DF4 /* MeetingDetailView.swift in Sources */,
 				4FE233302FB20C8E006F29C4 /* MicActiveBanner.swift in Sources */,
@@ -328,8 +350,10 @@
 				736E0E963334AD6D9DC4014D /* OllamaCheckView.swift in Sources */,
 				DE91E996433585F7D716E435 /* PermissionsView.swift in Sources */,
 				1ACD1614D2868F7F656CC41C /* RecordingBarView.swift in Sources */,
+				4FE233362FB22ECD006F29C4 /* MeetingMetadataEditor.swift in Sources */,
 				DAFBA525419AC3593E15C652 /* RootView.swift in Sources */,
 				4DFF5E1860DA6ED91537024A /* SettingsView.swift in Sources */,
+				4FE233382FB233D9006F29C4 /* MeetingTriageView.swift in Sources */,
 				3CD5B0718CDC4F204DD82E01 /* SidebarSelection.swift in Sources */,
 				33FFE4F5B4CA492FAF04C343 /* SuggestionBanner.swift in Sources */,
 				D64043B5A83483AE80CD1626 /* SummaryView.swift in Sources */,

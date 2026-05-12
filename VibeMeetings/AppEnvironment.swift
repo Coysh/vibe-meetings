@@ -20,6 +20,8 @@ final class AppEnvironment {
     var summarizationEngine: any SummarizationEngine
     let calendarService: any CalendarService
     let bannerCoordinator: BannerCoordinator
+    let summaryService = SummaryGenerationService()
+    let updateChecker = UpdateChecker()
 
     /// The current in-progress recording, if any. Set by `RootView` when a
     /// meeting starts; cleared when the user stops. Drives the banner's
@@ -55,16 +57,6 @@ final class AppEnvironment {
     /// and so that a refresh after folder creation lands before sheet dismissal.
     var folderTree: FolderNode?
 
-    /// Live state snapshot for the privacy badge.
-    var privacyState: PrivacyState = .localOnly
-
-    enum PrivacyState: Sendable, Equatable {
-        case localOnly
-        case lan(host: String)
-        case cloud(provider: String)
-        case downloadingModel(progress: Double)
-    }
-
     /// Which summarization backend is active: "ollama" or "openai".
     var activeSummarizationKind: String
 
@@ -74,12 +66,17 @@ final class AppEnvironment {
     /// Selected OpenAI model id for summarization.
     var selectedOpenAIModelId: String
 
+    /// User-editable system prompt override for summarization.
+    /// When non-empty, replaces the bundled prompt sent to the LLM.
+    var customSystemPrompt: String
+
     static let defaultOllamaURL = URL(string: "http://127.0.0.1:11434")!
     private static let ollamaURLKey = "VibeMeetings.OllamaBaseURL"
     private static let micDeviceUIDKey = "VibeMeetings.SelectedMicDeviceUID"
     private static let openAIKeyKey = "VibeMeetings.OpenAI.APIKey"
     private static let openAIModelKey = "VibeMeetings.OpenAI.SelectedModelId"
     private static let summEngineKey = "VibeMeetings.SummarizationEngine"
+    private static let customPromptKey = "VibeMeetings.CustomSystemPrompt"
 
     init() throws {
         let defaults = UserDefaults.standard
@@ -130,6 +127,7 @@ final class AppEnvironment {
 
         self.openAIApiKey = storedOpenAIKey
         self.selectedOpenAIModelId = storedOpenAIModel
+        self.customSystemPrompt = defaults.string(forKey: Self.customPromptKey) ?? ""
 
         if storedSummKind == OpenAIEngine.kind && !storedOpenAIKey.isEmpty {
             self.summarizationEngine = OpenAIEngine(apiKey: storedOpenAIKey, promptBundle: .main)
@@ -142,12 +140,6 @@ final class AppEnvironment {
         let cal = EventKitCalendarService()
         self.calendarService = cal
         self.bannerCoordinator = BannerCoordinator(calendar: cal)
-
-        if storedSummKind == OpenAIEngine.kind && !storedOpenAIKey.isEmpty {
-            self.privacyState = .cloud(provider: "OpenAI")
-        } else {
-            self.privacyState = AppEnvironment.privacyState(for: resolvedOllama)
-        }
     }
 
     /// Fetch the latest tree from the store and update `folderTree` on the
@@ -183,7 +175,6 @@ final class AppEnvironment {
         UserDefaults.standard.set(url.absoluteString, forKey: Self.ollamaURLKey)
         AppEnvironment.applyAllowedOllamaHost(url)
         self.summarizationEngine = OllamaEngine(baseURL: url, promptBundle: .main)
-        self.privacyState = AppEnvironment.privacyState(for: url)
     }
 
     /// Switch to the OpenAI summarization engine.
@@ -195,7 +186,6 @@ final class AppEnvironment {
         UserDefaults.standard.set(modelId, forKey: Self.openAIModelKey)
         UserDefaults.standard.set(OpenAIEngine.kind, forKey: Self.summEngineKey)
         self.summarizationEngine = OpenAIEngine(apiKey: apiKey, promptBundle: .main)
-        self.privacyState = .cloud(provider: "OpenAI")
     }
 
     /// Switch back to Ollama summarization.
@@ -203,7 +193,6 @@ final class AppEnvironment {
         self.activeSummarizationKind = OllamaEngine.kind
         UserDefaults.standard.set(OllamaEngine.kind, forKey: Self.summEngineKey)
         self.summarizationEngine = OllamaEngine(baseURL: ollamaBaseURL, promptBundle: .main)
-        self.privacyState = AppEnvironment.privacyState(for: ollamaBaseURL)
     }
 
     private static func applyAllowedOllamaHost(_ url: URL) {
@@ -218,10 +207,4 @@ final class AppEnvironment {
         }
     }
 
-    private static func privacyState(for url: URL) -> PrivacyState {
-        guard let host = url.host, !LocalhostOnlySession.isLoopback(host) else {
-            return .localOnly
-        }
-        return .lan(host: host)
-    }
 }

@@ -29,14 +29,15 @@ public final class OllamaEngine: SummarizationEngine, @unchecked Sendable {
         meeting: Meeting,
         modelId: String,
         style: SummaryStyle,
-        userNotes: String? = nil
+        userNotes: String? = nil,
+        customPrompt: String? = nil
     ) -> AsyncThrowingStream<String, Error> {
         AsyncThrowingStream { continuation in
             let task = Task {
                 do {
                     let speakerNames = Dictionary(uniqueKeysWithValues: meeting.participants.map { ($0.id, $0.displayName) })
-                    let body = PromptLoader.renderTranscript(transcript, speakerNames: speakerNames, userNotes: userNotes)
-                    let system = PromptLoader.systemPrompt(style: style, bundle: self.promptBundle)
+                    let body = PromptLoader.renderTranscript(transcript, speakerNames: speakerNames, meeting: meeting, userNotes: userNotes)
+                    let system = PromptLoader.systemPrompt(style: style, bundle: self.promptBundle, customPrompt: customPrompt)
 
                     let req = OllamaChatRequest(
                         model: modelId,

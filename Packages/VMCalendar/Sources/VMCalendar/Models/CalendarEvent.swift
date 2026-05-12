@@ -16,6 +16,7 @@ public struct CalendarEvent: Sendable, Hashable, Identifiable {
     public let teamsJoinURL: URL?
     public let calendarID: String
     public let calendarTitle: String
+    public let attendeeNames: [String]
 
     public var hasTeamsURL: Bool { teamsJoinURL != nil }
     public var platform: MeetingPlatform { hasTeamsURL ? .teams : .other }
@@ -30,7 +31,8 @@ public struct CalendarEvent: Sendable, Hashable, Identifiable {
         notes: String?,
         teamsJoinURL: URL?,
         calendarID: String,
-        calendarTitle: String
+        calendarTitle: String,
+        attendeeNames: [String] = []
     ) {
         self.id = id
         self.seriesID = seriesID
@@ -42,6 +44,7 @@ public struct CalendarEvent: Sendable, Hashable, Identifiable {
         self.teamsJoinURL = teamsJoinURL
         self.calendarID = calendarID
         self.calendarTitle = calendarTitle
+        self.attendeeNames = attendeeNames
     }
 }
 
@@ -53,6 +56,17 @@ extension CalendarEvent {
             ? CalendarEvent.fallbackSeriesID(for: ekEvent)
             : externalID
 
+        // Extract attendee display names, falling back to email local-part.
+        let names: [String] = (ekEvent.attendees ?? []).compactMap { participant in
+            if let name = participant.name, !name.isEmpty {
+                return name
+            }
+            let email = participant.url.absoluteString
+                .replacingOccurrences(of: "mailto:", with: "")
+            let local = email.components(separatedBy: "@").first ?? email
+            return local.isEmpty ? nil : local
+        }
+
         self.init(
             id: ekEvent.eventIdentifier ?? UUID().uuidString,
             seriesID: resolvedSeriesID,
@@ -63,7 +77,8 @@ extension CalendarEvent {
             notes: ekEvent.notes?.nilIfEmpty,
             teamsJoinURL: teamsURL,
             calendarID: ekEvent.calendar.calendarIdentifier,
-            calendarTitle: ekEvent.calendar.title
+            calendarTitle: ekEvent.calendar.title,
+            attendeeNames: names
         )
     }
 

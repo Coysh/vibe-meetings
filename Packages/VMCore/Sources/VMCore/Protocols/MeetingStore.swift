@@ -63,6 +63,10 @@ public struct MeetingDraft: Sendable {
     public var calendarEventID: String?
     public var calendarSeriesID: String?
     public var meetingPlatform: MeetingPlatform?
+    public var meetingType: MeetingType?
+    public var labels: [String]?
+    public var attendees: [String]?
+    public var org: String?
 
     public init(
         title: String,
@@ -74,7 +78,11 @@ public struct MeetingDraft: Sendable {
         sourceKind: SourceKind = .liveRecording,
         calendarEventID: String? = nil,
         calendarSeriesID: String? = nil,
-        meetingPlatform: MeetingPlatform? = nil
+        meetingPlatform: MeetingPlatform? = nil,
+        meetingType: MeetingType? = nil,
+        labels: [String]? = nil,
+        attendees: [String]? = nil,
+        org: String? = nil
     ) {
         self.title = title
         self.startedAt = startedAt
@@ -86,6 +94,10 @@ public struct MeetingDraft: Sendable {
         self.calendarEventID = calendarEventID
         self.calendarSeriesID = calendarSeriesID
         self.meetingPlatform = meetingPlatform
+        self.meetingType = meetingType
+        self.labels = labels
+        self.attendees = attendees
+        self.org = org
     }
 }
 
@@ -113,6 +125,13 @@ public protocol MeetingStore: Sendable {
     /// into the same parent folder as their previous occurrence.
     /// Returns nil if no meeting in the tree records that series ID.
     func folderForSeries(_ seriesID: String) async -> FolderNode?
+
+    /// Looks up the parent folder of any 1:1 meeting whose `person` name
+    /// matches. Used to auto-route future 1:1s with the same person.
+    func folderForPerson(_ name: String) async -> FolderNode?
+
+    /// Update meeting metadata in place and re-render transcript.md.
+    func updateMeeting(_ meeting: Meeting) async throws
 
     func appendSegments(_ segs: [TranscriptSegment], to id: UUID) async throws
     func replaceTranscript(_ segs: [TranscriptSegment], for id: UUID) async throws
