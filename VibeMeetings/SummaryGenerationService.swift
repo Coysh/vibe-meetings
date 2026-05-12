@@ -62,6 +62,9 @@ final class SummaryGenerationService {
 
     /// Start generating a summary in the background. If a job is already running
     /// for this meeting, it is cancelled and replaced.
+    ///
+    /// - Parameter silent: When `true`, skips the local notification on completion.
+    ///   Used for auto-generated summaries triggered when recording stops.
     func generate(
         meetingID: UUID,
         meetingTitle: String,
@@ -71,7 +74,8 @@ final class SummaryGenerationService {
         modelId: String,
         userNotes: String?,
         customPrompt: String?,
-        store: any MeetingStore
+        store: any MeetingStore,
+        silent: Bool = false
     ) {
         // Cancel existing job if any.
         tasks[meetingID]?.cancel()
@@ -97,8 +101,10 @@ final class SummaryGenerationService {
                 try? await store.writeSummary(job.partialSummary, for: meetingID)
                 job.complete()
 
-                // Post a local notification.
-                await self?.postCompletionNotification(title: meetingTitle)
+                // Post a local notification unless silent (auto-generated).
+                if !silent {
+                    await self?.postCompletionNotification(title: meetingTitle)
+                }
             } catch {
                 if !Task.isCancelled {
                     job.fail(with: error.localizedDescription)

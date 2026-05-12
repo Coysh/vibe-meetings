@@ -20,8 +20,11 @@ final class BannerCoordinator {
     /// "Your microphone just became active — start recording?"
     var micActiveSuggestion: Bool = false
 
-    /// "The meeting is past its scheduled end — stop recording?"
+    /// "The meeting has likely ended — stop recording?"
     var meetingEndSuggestion: Bool = false
+
+    /// Human-readable reason for the meeting end suggestion (e.g., "No audio for 2 minutes").
+    var meetingEndReason: String = ""
 
     // MARK: - Dependencies
 
@@ -37,6 +40,7 @@ final class BannerCoordinator {
     private var isRecordingProvider: () -> Bool = { false }
     private var activeEventProvider: () -> CalendarEvent? = { nil }
     private var micDismissed = false
+    private var meetingEndDetector: MeetingEndDetector?
 
     init(calendar: any CalendarService) {
         self.calendar = calendar
@@ -52,6 +56,11 @@ final class BannerCoordinator {
     /// recording, if any. Used for auto-end detection.
     func setActiveEventProvider(_ provider: @escaping () -> CalendarEvent?) {
         self.activeEventProvider = provider
+    }
+
+    /// Inject the meeting end detector for multi-signal end detection.
+    func setMeetingEndDetector(_ detector: MeetingEndDetector) {
+        self.meetingEndDetector = detector
     }
 
     func start() {
@@ -100,6 +109,8 @@ final class BannerCoordinator {
 
     func dismissMeetingEnd() {
         meetingEndSuggestion = false
+        meetingEndReason = ""
+        meetingEndDetector?.dismiss()
     }
 
     /// Called when a recording starts — resets per-session state.
@@ -155,13 +166,18 @@ final class BannerCoordinator {
     private func recomputeMeetingEnd() {
         guard isRecordingProvider() else {
             meetingEndSuggestion = false
+            meetingEndReason = ""
             return
         }
 
-        guard let event = activeEventProvider() else { return }
+        // Forward calendar event to the detector for time-based check.
+        let event = activeEventProvider()
+        meetingEndDetector?.checkCalendarEnd(event: event)
 
-        if Date() > event.endDate {
+        // Mirror the detector's combined decision (silence + calendar + app exit).
+        if let detector = meetingEndDetector, detector.shouldSuggestEnd {
             meetingEndSuggestion = true
+            meetingEndReason = detector.endReason
         }
     }
 }

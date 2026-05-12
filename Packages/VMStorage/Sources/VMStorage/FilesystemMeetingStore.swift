@@ -92,7 +92,20 @@ public actor FilesystemMeetingStore: MeetingStore {
 
     public func createMeeting(in folder: FolderNode, draft: MeetingDraft) async throws -> MeetingHandle {
         let parent = folder.url
-        let folderName = sanitizedMeetingFolderName(date: draft.startedAt, title: draft.title)
+
+        // Build a temporary Meeting to compute the folder name using the
+        // full yyyy-MM-dd-name-title format (needs attendees/person info).
+        let tempMeeting = Meeting(
+            title: draft.title,
+            startedAt: draft.startedAt,
+            folderRelativePath: "",
+            transcriptionEngine: draft.transcriptionEngine,
+            modelId: draft.modelId,
+            meetingType: draft.meetingType,
+            attendees: draft.attendees,
+            org: draft.org
+        )
+        let folderName = meetingFolderName(for: tempMeeting)
         let meetingURL = uniqueURL(parent: parent, base: folderName)
         let relativePath = meetingURL.path.replacingOccurrences(of: rootURL.path + "/", with: "")
 
@@ -145,7 +158,7 @@ public actor FilesystemMeetingStore: MeetingStore {
         try FolderTreeScanner.writeMeeting(meeting, to: mf.metadataURL)
 
         let parent = url.deletingLastPathComponent()
-        let newName = sanitizedMeetingFolderName(date: meeting.startedAt, title: title)
+        let newName = meetingFolderName(for: meeting)
         if newName != url.lastPathComponent {
             let dest = uniqueURL(parent: parent, base: newName)
             try FileManager.default.moveItem(at: url, to: dest)
@@ -312,6 +325,43 @@ public actor FilesystemMeetingStore: MeetingStore {
         return url
     }
 
+    /// Produces a meeting folder name in `yyyy-MM-dd-name-title` format.
+    /// Falls back to `yyyy-MM-dd-title` when no person name is available.
+    private func meetingFolderName(for meeting: Meeting) -> String {
+        let df = DateFormatter()
+        df.dateFormat = "yyyy-MM-dd"
+        let datePart = df.string(from: meeting.startedAt)
+
+        let person = meeting.person ?? meeting.attendees?.first(where: { $0.lowercased() != "you" })
+        let namePart = person.map { slugify($0) }
+
+        let titleSlug = slugify(meeting.title)
+
+        var parts = [datePart]
+        if let namePart, !namePart.isEmpty {
+            parts.append(namePart)
+            // Remove the person name from the title to avoid duplication.
+            let cleanedTitle = titleSlug.replacingOccurrences(of: namePart, with: "")
+                .trimmingCharacters(in: CharacterSet(charactersIn: "-"))
+                .replacingOccurrences(of: "--", with: "-")
+            if !cleanedTitle.isEmpty {
+                parts.append(cleanedTitle)
+            }
+        } else if !titleSlug.isEmpty {
+            parts.append(titleSlug)
+        }
+        return parts.joined(separator: "-")
+    }
+
+    /// Lowercases and replaces non-alphanumeric runs with hyphens.
+    private func slugify(_ raw: String) -> String {
+        raw.lowercased()
+            .components(separatedBy: CharacterSet.alphanumerics.inverted)
+            .filter { !$0.isEmpty }
+            .joined(separator: "-")
+    }
+
+    /// Legacy: simple date+title format for drafts that haven't been enriched yet.
     private func sanitizedMeetingFolderName(date: Date, title: String) -> String {
         let df = DateFormatter()
         df.dateFormat = "yyyy-MM-dd"

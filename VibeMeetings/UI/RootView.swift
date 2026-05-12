@@ -1,6 +1,7 @@
 import SwiftUI
 import VMCore
 import VMStorage
+import VMSummarization
 
 struct RootView: View {
     @Environment(AppEnvironment.self) private var env
@@ -8,6 +9,8 @@ struct RootView: View {
     @State private var newMeetingSheet = false
     @State private var preselectedEventID: String?
     @State private var showTriageSheet = false
+    @State private var postRecordingMeetingID: UUID?
+    @State private var postRecordingFolderURL: URL?
 
     var body: some View {
         NavigationSplitView {
@@ -20,7 +23,9 @@ struct RootView: View {
         } detail: {
             VStack(spacing: 0) {
                 if let controller = env.activeRecordingController {
-                    RecordingBarView(controller: controller)
+                    RecordingBarView(controller: controller, onStopped: {
+                        handleRecordingStopped()
+                    })
                     Divider()
                 }
                 Group {
@@ -55,10 +60,14 @@ struct RootView: View {
                     }
                     if env.bannerCoordinator.meetingEndSuggestion {
                         MeetingEndBanner(
+                            reason: env.bannerCoordinator.meetingEndReason,
                             onStop: {
                                 env.bannerCoordinator.dismissMeetingEnd()
                                 if let controller = env.activeRecordingController {
-                                    Task { await controller.stop() }
+                                    Task {
+                                        _ = await controller.stop()
+                                        handleRecordingStopped()
+                                    }
                                 }
                             },
                             onKeep: { env.bannerCoordinator.dismissMeetingEnd() }
@@ -78,6 +87,7 @@ struct RootView: View {
             env.bannerCoordinator.setActiveEventProvider {
                 env.activeRecordingController?.linkedCalendarEvent
             }
+            env.bannerCoordinator.setMeetingEndDetector(env.meetingEndDetector)
             env.bannerCoordinator.start()
             await env.updateChecker.checkForUpdates()
             for await tree in env.meetingStore.tree {
@@ -110,6 +120,64 @@ struct RootView: View {
         }
         .onReceive(NotificationCenter.default.publisher(for: .newMeetingRequested)) { _ in
             newMeetingSheet = true
+        }
+        .sheet(isPresented: Binding(
+            get: { postRecordingMeetingID != nil },
+            set: { if !$0 { postRecordingMeetingID = nil; postRecordingFolderURL = nil } }
+        )) {
+            if let meetingID = postRecordingMeetingID,
+               let folderURL = postRecordingFolderURL {
+                PostRecordingSheet(meetingID: meetingID, meetingFolderURL: folderURL)
+            }
+        }
+    }
+
+    /// Captures the meeting info from the just-finished recording, clears the
+    /// recording controller, presents the post-recording metadata sheet, and
+    /// kicks off background summary generation automatically.
+    private func handleRecordingStopped() {
+        guard let controller = env.activeRecordingController,
+              let handle = controller.meetingHandle else {
+            env.activeRecordingController = nil
+            return
+        }
+        let meetingID = handle.meeting.id
+        let folderURL = handle.folderURL
+
+        // Snapshot data needed for summary before clearing the controller.
+        let segments = controller.liveSegments.map { seg in
+            var s = seg
+            s.isPartial = false
+            return s
+        }
+        let meeting = handle.meeting
+        let userNotes = controller.notes.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+            ? nil : controller.notes
+
+        env.activeRecordingController = nil
+        postRecordingFolderURL = folderURL
+        postRecordingMeetingID = meetingID
+
+        // Auto-generate summary in the background (silently, no notification).
+        if !segments.isEmpty {
+            let modelId = env.activeSummarizationKind == OpenAIEngine.kind
+                ? env.selectedOpenAIModelId
+                : env.selectedOllamaModelId
+            let prompt = env.customSystemPrompt.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+                ? nil : env.customSystemPrompt
+
+            env.summaryService.generate(
+                meetingID: meetingID,
+                meetingTitle: meeting.title,
+                segments: segments,
+                meeting: meeting,
+                engine: env.summarizationEngine,
+                modelId: modelId,
+                userNotes: userNotes,
+                customPrompt: prompt,
+                store: env.meetingStore,
+                silent: true
+            )
         }
     }
 

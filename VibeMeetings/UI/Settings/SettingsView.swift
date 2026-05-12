@@ -61,6 +61,37 @@ private struct GeneralSettingsView: View {
                     .foregroundStyle(.orange)
             }
 
+            Section("Auto-End Detection") {
+                Toggle("Enable auto-end detection", isOn: Binding(
+                    get: { env.meetingEndDetector.autoEndEnabled },
+                    set: { env.meetingEndDetector.autoEndEnabled = $0 }
+                ))
+
+                if env.meetingEndDetector.autoEndEnabled {
+                    LabeledContent("Silence threshold") {
+                        Picker("", selection: Binding(
+                            get: { env.meetingEndDetector.silenceThresholdSeconds },
+                            set: { env.meetingEndDetector.silenceThresholdSeconds = $0 }
+                        )) {
+                            Text("1 minute").tag(TimeInterval(60))
+                            Text("2 minutes").tag(TimeInterval(120))
+                            Text("3 minutes").tag(TimeInterval(180))
+                            Text("5 minutes").tag(TimeInterval(300))
+                        }
+                        .frame(width: 150)
+                    }
+
+                    Toggle("Monitor meeting apps (Teams, Zoom)", isOn: Binding(
+                        get: { env.meetingEndDetector.appMonitoringEnabled },
+                        set: { env.meetingEndDetector.appMonitoringEnabled = $0 }
+                    ))
+
+                    Text("Suggests stopping the recording when the scheduled end time passes, audio goes silent, or the meeting app exits.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+            }
+
             Section("Updates") {
                 TextField("GitHub repo (owner/repo)", text: Binding(
                     get: { env.updateChecker.githubRepo },

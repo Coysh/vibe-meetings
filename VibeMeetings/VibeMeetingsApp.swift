@@ -16,6 +16,13 @@ struct VibeMeetingsApp: App {
                 if let env = appEnv {
                     RootView()
                         .environment(env)
+                        .onChange(of: env.activeRecordingController != nil) { _, isRecording in
+                            if isRecording {
+                                DockIconManager.showRecordingBadge()
+                            } else {
+                                DockIconManager.clearRecordingBadge()
+                            }
+                        }
                 } else {
                     Text("Failed to start. See log.")
                         .frame(minWidth: 600, minHeight: 400)

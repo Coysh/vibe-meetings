@@ -1,8 +1,9 @@
 import SwiftUI
 
-/// Banner shown when the calendar event linked to the current recording has
-/// passed its scheduled end time.
+/// Banner shown when the meeting has likely ended — triggered by calendar time,
+/// extended audio silence, or meeting app exit.
 struct MeetingEndBanner: View {
+    let reason: String
     let onStop: () -> Void
     let onKeep: () -> Void
 
@@ -12,7 +13,7 @@ struct MeetingEndBanner: View {
                 .foregroundStyle(.orange)
 
             VStack(alignment: .leading, spacing: 2) {
-                Text("**Meeting has passed its scheduled end time**")
+                Text("**\(reason.isEmpty ? "Meeting may have ended" : reason)**")
                     .lineLimit(1)
                 Text("Would you like to stop recording?")
                     .font(.caption)

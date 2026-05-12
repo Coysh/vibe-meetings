@@ -22,6 +22,7 @@ final class AppEnvironment {
     let bannerCoordinator: BannerCoordinator
     let summaryService = SummaryGenerationService()
     let updateChecker = UpdateChecker()
+    let meetingEndDetector = MeetingEndDetector()
 
     /// The current in-progress recording, if any. Set by `RootView` when a
     /// meeting starts; cleared when the user stops. Drives the banner's

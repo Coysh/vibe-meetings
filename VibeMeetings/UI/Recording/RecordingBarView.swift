@@ -95,6 +95,9 @@ final class RecordingController {
         }
         state = .recording
 
+        // Notify the meeting end detector that recording has started.
+        env.meetingEndDetector.recordingDidStart(event: linkedCalendarEvent)
+
         // Live transcription pumps — one per channel.
         let micStream = env.activeTranscriptionEngine.transcribeStream(
             input: coordinator.micPCM,
@@ -122,12 +125,14 @@ final class RecordingController {
             } catch { print("sys stream error: \(error)") }
         })
 
-        // Levels
+        // Levels — also forward to the meeting end detector for silence detection.
         let levelStream = coordinator.levels
+        let detector = env.meetingEndDetector
         streamTasks.append(Task {
             for await snap in levelStream {
                 self.micLevel = snap.mic
                 self.systemLevel = snap.system
+                detector.updateLevels(mic: snap.mic, system: snap.system)
             }
         })
 
@@ -175,16 +180,18 @@ final class RecordingController {
             try? FolderTreeScanner.writeMeeting(updated, to: MeetingFolder(url: handle.folderURL).metadataURL)
         }
         state = .idle
-        if env.activeRecordingController === self {
-            env.activeRecordingController = nil
-            env.bannerCoordinator.recordingDidStop()
-        }
+        // NOTE: The caller (RootView) is responsible for clearing
+        // env.activeRecordingController and showing the post-recording sheet.
+        // This allows the caller to read meetingHandle before it's lost.
+        env.bannerCoordinator.recordingDidStop()
+        env.meetingEndDetector.recordingDidStop()
         return result
     }
 }
 
 struct RecordingBarView: View {
     @Bindable var controller: RecordingController
+    var onStopped: (() -> Void)?
     @State private var showNotes = false
 
     var body: some View {
@@ -218,7 +225,10 @@ struct RecordingBarView: View {
                     .help("Meeting notes")
 
                     Button("Stop") {
-                        Task { await controller.stop() }
+                        Task {
+                            _ = await controller.stop()
+                            onStopped?()
+                        }
                     }
                     .buttonStyle(.borderedProminent)
                     .tint(.red)
