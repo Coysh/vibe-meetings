@@ -5,6 +5,14 @@
         <language>en</language>
         <!-- Items are added by release.sh using Sparkle's generate_appcast tool -->
         <item>
+            <title>1.3.2</title>
+            <pubDate>Wed, 13 May 2026 23:03:22 +0100</pubDate>
+            <sparkle:version>202605132302</sparkle:version>
+            <sparkle:shortVersionString>1.3.2</sparkle:shortVersionString>
+            <sparkle:minimumSystemVersion>15.0</sparkle:minimumSystemVersion>
+            <enclosure url="https://raw.githubusercontent.com/Coysh/vibe-meetings/main/VibeMeetings.zip" length="7505867" type="application/octet-stream" sparkle:edSignature="7epLl5sdTxYJ+zjsJzyEDyMAUWXpLEb2EqQmyseOsQNsv5uTPK4I6oC6Mb29B/vtS4nOw2vakg5qAWvCO2enCQ=="/>
+        </item>
+        <item>
             <title>1.3.1</title>
             <pubDate>Wed, 13 May 2026 21:31:24 +0100</pubDate>
             <sparkle:version>202605132130</sparkle:version>
