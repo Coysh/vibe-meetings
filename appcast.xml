@@ -5,6 +5,14 @@
         <language>en</language>
         <!-- Items are added by release.sh using Sparkle's generate_appcast tool -->
         <item>
+            <title>1.4.1</title>
+            <pubDate>Wed, 13 May 2026 23:13:14 +0100</pubDate>
+            <sparkle:version>202605132312</sparkle:version>
+            <sparkle:shortVersionString>1.4.1</sparkle:shortVersionString>
+            <sparkle:minimumSystemVersion>15.0</sparkle:minimumSystemVersion>
+            <enclosure url="https://raw.githubusercontent.com/Coysh/vibe-meetings/main/VibeMeetings.zip" length="7571449" type="application/octet-stream" sparkle:edSignature="+ECP7iXUKcejzTC7AhLphab/1aud8kqQTpPZmWlhHbr80U+GAljL5BLi9OVPYB9xODCJgYBDa3nmxoQnkBJTCA=="/>
+        </item>
+        <item>
             <title>1.4.0</title>
             <pubDate>Wed, 13 May 2026 23:09:02 +0100</pubDate>
             <sparkle:version>202605132308</sparkle:version>
@@ -19,14 +27,6 @@
             <sparkle:shortVersionString>1.3.2</sparkle:shortVersionString>
             <sparkle:minimumSystemVersion>15.0</sparkle:minimumSystemVersion>
             <enclosure url="https://raw.githubusercontent.com/Coysh/vibe-meetings/main/VibeMeetings.zip" length="7505867" type="application/octet-stream" sparkle:edSignature="7epLl5sdTxYJ+zjsJzyEDyMAUWXpLEb2EqQmyseOsQNsv5uTPK4I6oC6Mb29B/vtS4nOw2vakg5qAWvCO2enCQ=="/>
-        </item>
-        <item>
-            <title>1.3.1</title>
-            <pubDate>Wed, 13 May 2026 21:31:24 +0100</pubDate>
-            <sparkle:version>202605132130</sparkle:version>
-            <sparkle:shortVersionString>1.3.1</sparkle:shortVersionString>
-            <sparkle:minimumSystemVersion>15.0</sparkle:minimumSystemVersion>
-            <enclosure url="https://raw.githubusercontent.com/Coysh/vibe-meetings/main/VibeMeetings.zip" length="7509167" type="application/octet-stream"/>
         </item>
     </channel>
 </rss>
