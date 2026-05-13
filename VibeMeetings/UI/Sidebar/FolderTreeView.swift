@@ -1,6 +1,8 @@
 import SwiftUI
 import UniformTypeIdentifiers
 import VMCore
+import VMCalendar
+import VMStorage
 
 /// Sidebar view backed by the on-disk tree. Selection is a `SidebarSelection`
 /// so folders and meetings share one binding; right-clicking any row opens a
@@ -14,25 +16,68 @@ struct FolderTreeView: View {
     @State private var renameTarget: RenameTarget?
     @State private var deleteTarget: DeleteTarget?
     @State private var bulkDeleteItems: [BulkDeleteItem]?
+    @State private var viewMode: SidebarViewMode = .folders
+    @State private var searchText = ""
+    @State private var contentMatchIDs: Set<UUID> = []
+    @State private var searchTask: Task<Void, Never>?
+    @State private var upcomingEvents: [CalendarEvent] = []
+
+    enum SidebarViewMode: String, CaseIterable {
+        case folders = "Folders"
+        case recent = "Recent"
+    }
 
     var body: some View {
-        Group {
-            if let root, !root.children.isEmpty {
-                List(selection: $selection) {
-                    OutlineGroup(root.children, id: \.id, children: \.optionalChildren) { node in
-                        row(for: node)
-                            .tag(tag(for: node))
-                            .contextMenu { contextMenu(for: node) }
+        VStack(spacing: 0) {
+            // Search field
+            HStack(spacing: 6) {
+                Image(systemName: "magnifyingglass")
+                    .foregroundStyle(.secondary)
+                    .font(.caption)
+                TextField("Search meetings…", text: $searchText)
+                    .textFieldStyle(.plain)
+                    .font(.callout)
+                if !searchText.isEmpty {
+                    Button {
+                        searchText = ""
+                        contentMatchIDs.removeAll()
+                    } label: {
+                        Image(systemName: "xmark.circle.fill")
+                            .foregroundStyle(.secondary)
+                            .font(.caption)
                     }
+                    .buttonStyle(.plain)
                 }
-                .listStyle(.sidebar)
-            } else {
-                ContentUnavailableView(
-                    "No meetings yet",
-                    systemImage: "folder",
-                    description: Text("Create a folder, then start a meeting (⌘N).")
-                )
             }
+            .padding(8)
+            .background(.fill.quaternary, in: RoundedRectangle(cornerRadius: 8))
+            .padding(.horizontal, 12)
+            .padding(.top, 8)
+            .padding(.bottom, 4)
+
+            Picker("", selection: $viewMode) {
+                ForEach(SidebarViewMode.allCases, id: \.self) { mode in
+                    Text(mode.rawValue).tag(mode)
+                }
+            }
+            .pickerStyle(.segmented)
+            .padding(.horizontal, 12)
+            .padding(.vertical, 4)
+
+            Group {
+                switch viewMode {
+                case .folders:
+                    folderListView
+                case .recent:
+                    recentListView
+                }
+            }
+        }
+        .onChange(of: searchText) {
+            debounceContentSearch()
+        }
+        .task {
+            upcomingEvents = await env.calendarService.upcomingEvents(within: 24 * 60 * 60)
         }
         .toolbar {
             ToolbarItemGroup(placement: .secondaryAction) {
@@ -170,6 +215,328 @@ struct FolderTreeView: View {
             guard !selection.isEmpty else { return }
             requestBulkDelete()
         }
+    }
+
+    // MARK: - Search
+
+    private var isSearching: Bool {
+        !searchText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+    }
+
+    private var query: String {
+        searchText.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+    }
+
+    private func meetingMatchesSearch(_ meeting: Meeting) -> Bool {
+        guard isSearching else { return true }
+        if meeting.title.lowercased().contains(query) { return true }
+        if meeting.attendees?.contains(where: { $0.lowercased().contains(query) }) == true { return true }
+        if meeting.org?.lowercased().contains(query) == true { return true }
+        if contentMatchIDs.contains(meeting.id) { return true }
+        return false
+    }
+
+    private func debounceContentSearch() {
+        searchTask?.cancel()
+        let currentQuery = query
+        guard !currentQuery.isEmpty else {
+            contentMatchIDs.removeAll()
+            return
+        }
+        searchTask = Task {
+            try? await Task.sleep(for: .milliseconds(300))
+            guard !Task.isCancelled else { return }
+            let matches = await searchContent(query: currentQuery)
+            guard !Task.isCancelled else { return }
+            contentMatchIDs = matches
+        }
+    }
+
+    private func searchContent(query: String) async -> Set<UUID> {
+        guard let root else { return [] }
+        var items: [MeetingItem] = []
+        collectMeetings(from: root, parentName: nil, into: &items)
+
+        var matches = Set<UUID>()
+        for item in items {
+            // Already matched by title — skip disk read.
+            if item.meeting.title.lowercased().contains(query) { continue }
+            // Check transcript and summary on disk.
+            if let transcript = try? await env.meetingStore.loadSummary(for: item.meeting.id),
+               transcript.lowercased().contains(query) {
+                matches.insert(item.meeting.id)
+                continue
+            }
+            if let segments = try? await env.meetingStore.loadTranscript(for: item.meeting.id),
+               segments.contains(where: { $0.text.lowercased().contains(query) }) {
+                matches.insert(item.meeting.id)
+            }
+        }
+        return matches
+    }
+
+    // MARK: - List views
+
+    @ViewBuilder
+    private var folderListView: some View {
+        if let root, !root.children.isEmpty {
+            if isSearching {
+                // In search mode, show a flat filtered list instead of the tree.
+                let matches = allMeetingsSorted.filter { meetingMatchesSearch($0.meeting) }
+                if matches.isEmpty {
+                    ContentUnavailableView.search(text: searchText)
+                } else {
+                    List(selection: $selection) {
+                        ForEach(matches, id: \.meeting.id) { item in
+                            recentRow(meeting: item.meeting, folderName: item.folderName)
+                                .tag(SidebarSelection.meeting(item.meeting.id))
+                                .contextMenu {
+                                    if let node = findMeetingNode(id: item.meeting.id, in: root) {
+                                        contextMenu(for: node)
+                                    }
+                                }
+                        }
+                    }
+                    .listStyle(.sidebar)
+                }
+            } else {
+                List(selection: $selection) {
+                    OutlineGroup(root.children, id: \.id, children: \.optionalChildren) { node in
+                        row(for: node)
+                            .tag(tag(for: node))
+                            .contextMenu { contextMenu(for: node) }
+                    }
+                }
+                .listStyle(.sidebar)
+            }
+        } else {
+            ContentUnavailableView(
+                "No meetings yet",
+                systemImage: "folder",
+                description: Text("Create a folder, then start a meeting (⌘N).")
+            )
+        }
+    }
+
+    @ViewBuilder
+    private var recentListView: some View {
+        let meetings = allMeetingsSorted
+        let filtered = isSearching
+            ? meetings.filter { meetingMatchesSearch($0.meeting) }
+            : meetings
+
+        if isSearching && filtered.isEmpty {
+            ContentUnavailableView.search(text: searchText)
+        } else if meetings.isEmpty && !isSearching {
+            ContentUnavailableView(
+                "No meetings yet",
+                systemImage: "waveform.badge.mic",
+                description: Text("Start a meeting with ⌘N.")
+            )
+        } else {
+            List(selection: $selection) {
+                // Upcoming meetings from calendar (only when not searching).
+                if !isSearching {
+                    let upcoming = futureCalendarEvents
+                    if !upcoming.isEmpty {
+                        Section {
+                            ForEach(upcoming) { event in
+                                upcomingEventRow(event: event)
+                            }
+                        } header: {
+                            Text("Upcoming")
+                        }
+                    }
+                }
+
+                // Date-grouped past meetings.
+                let grouped = groupedByDate(filtered)
+                ForEach(grouped, id: \.label) { group in
+                    Section {
+                        ForEach(group.items, id: \.meeting.id) { item in
+                            recentRow(meeting: item.meeting, folderName: item.folderName)
+                                .tag(SidebarSelection.meeting(item.meeting.id))
+                                .contextMenu {
+                                    if let root, let node = findMeetingNode(id: item.meeting.id, in: root) {
+                                        contextMenu(for: node)
+                                    }
+                                }
+                        }
+                    } header: {
+                        Text(group.label)
+                    }
+                }
+            }
+            .listStyle(.sidebar)
+        }
+    }
+
+    // MARK: - Upcoming calendar events
+
+    private var futureCalendarEvents: [CalendarEvent] {
+        let now = Date()
+        return upcomingEvents
+            .filter { $0.startDate > now }
+            .sorted { $0.startDate < $1.startDate }
+    }
+
+    @ViewBuilder
+    private func upcomingEventRow(event: CalendarEvent) -> some View {
+        VStack(alignment: .leading, spacing: 6) {
+            HStack(spacing: 6) {
+                Image(systemName: "calendar")
+                    .foregroundStyle(.orange)
+                    .font(.caption)
+                VStack(alignment: .leading, spacing: 1) {
+                    HStack(spacing: 4) {
+                        Text(event.title).lineLimit(1).font(.callout)
+                        if event.hasTeamsURL {
+                            Text("Teams")
+                                .font(.caption2.bold())
+                                .padding(.horizontal, 5)
+                                .padding(.vertical, 1)
+                                .background(Color.purple.opacity(0.2), in: Capsule())
+                                .foregroundStyle(.purple)
+                        }
+                    }
+                    Text(event.startDate, format: .dateTime.hour().minute())
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
+                }
+                Spacer()
+            }
+            HStack(spacing: 6) {
+                if event.hasTeamsURL {
+                    Button {
+                        joinAndRecord(event: event)
+                    } label: {
+                        Label("Join & Record", systemImage: "video.fill")
+                            .font(.caption)
+                    }
+                    .buttonStyle(.borderedProminent)
+                    .tint(.purple)
+                    .controlSize(.small)
+                }
+                Button {
+                    startRecording(event: event)
+                } label: {
+                    Label("Record", systemImage: "record.circle")
+                        .font(.caption)
+                }
+                .buttonStyle(.bordered)
+                .controlSize(.small)
+            }
+        }
+        .padding(.vertical, 2)
+    }
+
+    private func joinAndRecord(event: CalendarEvent) {
+        if let url = event.teamsJoinURL {
+            NSWorkspace.shared.open(url)
+        }
+        // Brief delay so Teams can launch, then trigger recording.
+        Task {
+            try? await Task.sleep(for: .seconds(1.5))
+            NotificationCenter.default.post(
+                name: .newMeetingRequested,
+                object: nil,
+                userInfo: ["preselectedEventID": event.id]
+            )
+        }
+    }
+
+    private func startRecording(event: CalendarEvent) {
+        NotificationCenter.default.post(
+            name: .newMeetingRequested,
+            object: nil,
+            userInfo: ["preselectedEventID": event.id]
+        )
+    }
+
+    // MARK: - Date grouping
+
+    private struct DateGroup {
+        let label: String
+        let items: [MeetingItem]
+    }
+
+    private func groupedByDate(_ items: [MeetingItem]) -> [DateGroup] {
+        let calendar = Calendar.current
+        let now = Date()
+        let startOfToday = calendar.startOfDay(for: now)
+        let startOfYesterday = calendar.date(byAdding: .day, value: -1, to: startOfToday)!
+        let startOfThisWeek = calendar.date(from: calendar.dateComponents([.yearForWeekOfYear, .weekOfYear], from: now))!
+
+        var today: [MeetingItem] = []
+        var yesterday: [MeetingItem] = []
+        var thisWeek: [MeetingItem] = []
+        var earlier: [MeetingItem] = []
+
+        for item in items {
+            let date = item.meeting.startedAt
+            if date >= startOfToday {
+                today.append(item)
+            } else if date >= startOfYesterday {
+                yesterday.append(item)
+            } else if date >= startOfThisWeek {
+                thisWeek.append(item)
+            } else {
+                earlier.append(item)
+            }
+        }
+
+        var groups: [DateGroup] = []
+        if !today.isEmpty { groups.append(DateGroup(label: "Today", items: today)) }
+        if !yesterday.isEmpty { groups.append(DateGroup(label: "Yesterday", items: yesterday)) }
+        if !thisWeek.isEmpty { groups.append(DateGroup(label: "This Week", items: thisWeek)) }
+        if !earlier.isEmpty { groups.append(DateGroup(label: "Earlier", items: earlier)) }
+        return groups
+    }
+
+    // MARK: - Data collection
+
+    private struct MeetingItem {
+        let meeting: Meeting
+        let folderName: String
+    }
+
+    private var allMeetingsSorted: [MeetingItem] {
+        guard let root else { return [] }
+        var items: [MeetingItem] = []
+        collectMeetings(from: root, parentName: nil, into: &items)
+        items.sort { $0.meeting.startedAt > $1.meeting.startedAt }
+        return items
+    }
+
+    private func collectMeetings(from node: FolderNode, parentName: String?, into items: inout [MeetingItem]) {
+        if node.isMeeting, let meeting = node.meeting {
+            items.append(MeetingItem(meeting: meeting, folderName: parentName ?? ""))
+        }
+        for child in node.children {
+            let name = node.isMeeting ? parentName : node.name
+            collectMeetings(from: child, parentName: name, into: &items)
+        }
+    }
+
+    @ViewBuilder
+    private func recentRow(meeting: Meeting, folderName: String) -> some View {
+        Label {
+            VStack(alignment: .leading, spacing: 1) {
+                Text(meeting.title).lineLimit(1)
+                HStack(spacing: 4) {
+                    Text(meeting.startedAt, format: .dateTime.hour().minute())
+                    if !folderName.isEmpty {
+                        Text("·")
+                        Text(folderName).lineLimit(1)
+                    }
+                }
+                .font(.caption2)
+                .foregroundStyle(.secondary)
+            }
+        } icon: {
+            Image(systemName: "waveform")
+        }
+        .draggable(meeting.id.uuidString)
     }
 
     // MARK: - rows

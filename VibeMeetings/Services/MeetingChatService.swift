@@ -164,13 +164,14 @@ final class MeetingChatService {
             id: UUID(),
             title: "Chat Query",
             startedAt: Date(),
+            folderRelativePath: "",
             transcriptionEngine: EngineRef(kind: "chat", version: "1"),
             summarizationEngine: EngineRef(kind: "chat", version: "1"),
             modelId: modelId
         )
 
         // Append an empty assistant message to fill in progressively.
-        var assistantMsg = ChatMessage(role: .assistant, content: "", referencedMeetings: references)
+        let assistantMsg = ChatMessage(role: .assistant, content: "", referencedMeetings: references)
         messages.append(assistantMsg)
         let msgIndex = messages.count - 1
 
@@ -208,7 +209,7 @@ final class MeetingChatService {
 
     private func loadChatPrompt() -> String {
         if let url = Bundle.main.url(forResource: "chat.system", withExtension: "md", subdirectory: "Prompts"),
-           let content = try? String(contentsOf: url) {
+           let content = try? String(contentsOf: url, encoding: .utf8) {
             return content
         }
         // Fallback inline prompt.

@@ -162,7 +162,7 @@ struct NewMeetingSheet: View {
             // Extract metadata from calendar event if applicable.
             var attendees: [String]?
             var meetingType: MeetingType?
-            var org: String?
+            var org: String? = env.configuredOrgs.first // Default org
 
             if case .event(let id) = selection,
                let ev = todaysEvents.first(where: { $0.id == id }) {
@@ -197,7 +197,7 @@ struct NewMeetingSheet: View {
                 org: org
             )
 
-            // Folder routing: series folder → person folder (for 1:1s) → parentFolder.
+            // Folder routing: series → person (for 1:1s) → org → parentFolder.
             let target: FolderNode
             if let sid = seriesID,
                let existing = await env.meetingStore.folderForSeries(sid) {
@@ -206,6 +206,9 @@ struct NewMeetingSheet: View {
                       let personName = attendees?.first(where: { $0.lowercased() != "you" }) ?? attendees?.first,
                       let personFolder = await env.meetingStore.folderForPerson(personName) {
                 target = personFolder
+            } else if let orgName = org,
+                      let orgFolder = await env.meetingStore.folderForOrg(orgName) {
+                target = orgFolder
             } else {
                 target = parentFolder
             }

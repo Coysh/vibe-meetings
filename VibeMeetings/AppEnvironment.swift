@@ -22,6 +22,7 @@ final class AppEnvironment {
     let bannerCoordinator: BannerCoordinator
     let summaryService = SummaryGenerationService()
     let updateChecker = UpdateChecker()
+    let sparkleUpdater = SparkleUpdater()
     let meetingEndDetector = MeetingEndDetector()
 
     /// The current in-progress recording, if any. Set by `RootView` when a
@@ -71,6 +72,9 @@ final class AppEnvironment {
     /// When non-empty, replaces the bundled prompt sent to the LLM.
     var customSystemPrompt: String
 
+    /// User-configured organizations shown in the org picker.
+    var configuredOrgs: [String]
+
     static let defaultOllamaURL = URL(string: "http://127.0.0.1:11434")!
     private static let ollamaURLKey = "VibeMeetings.OllamaBaseURL"
     private static let micDeviceUIDKey = "VibeMeetings.SelectedMicDeviceUID"
@@ -78,6 +82,7 @@ final class AppEnvironment {
     private static let openAIModelKey = "VibeMeetings.OpenAI.SelectedModelId"
     private static let summEngineKey = "VibeMeetings.SummarizationEngine"
     private static let customPromptKey = "VibeMeetings.CustomSystemPrompt"
+    private static let configuredOrgsKey = "VibeMeetings.ConfiguredOrgs"
 
     init() throws {
         let defaults = UserDefaults.standard
@@ -129,6 +134,7 @@ final class AppEnvironment {
         self.openAIApiKey = storedOpenAIKey
         self.selectedOpenAIModelId = storedOpenAIModel
         self.customSystemPrompt = defaults.string(forKey: Self.customPromptKey) ?? ""
+        self.configuredOrgs = defaults.stringArray(forKey: Self.configuredOrgsKey) ?? ["Evangelical Alliance", "Coysh Digital"]
 
         if storedSummKind == OpenAIEngine.kind && !storedOpenAIKey.isEmpty {
             self.summarizationEngine = OpenAIEngine(apiKey: storedOpenAIKey, promptBundle: .main)
@@ -194,6 +200,12 @@ final class AppEnvironment {
         self.activeSummarizationKind = OllamaEngine.kind
         UserDefaults.standard.set(OllamaEngine.kind, forKey: Self.summEngineKey)
         self.summarizationEngine = OllamaEngine(baseURL: ollamaBaseURL, promptBundle: .main)
+    }
+
+    /// Update the configured organizations list and persist.
+    func setConfiguredOrgs(_ orgs: [String]) {
+        self.configuredOrgs = orgs
+        UserDefaults.standard.set(orgs, forKey: Self.configuredOrgsKey)
     }
 
     private static func applyAllowedOllamaHost(_ url: URL) {

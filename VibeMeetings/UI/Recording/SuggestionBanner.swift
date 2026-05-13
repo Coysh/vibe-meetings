@@ -12,7 +12,7 @@ struct SuggestionBanner: View {
                 .foregroundStyle(.purple)
 
             VStack(alignment: .leading, spacing: 2) {
-                Text("**\(event.title)** is starting on Teams")
+                Text("**\(event.title)** \(event.hasTeamsURL ? "is starting on Teams" : "— meeting app detected")")
                     .lineLimit(1)
                 Text("Starts \(event.startDate.formatted(date: .omitted, time: .shortened)) · \(event.calendarTitle)")
                     .font(.caption)

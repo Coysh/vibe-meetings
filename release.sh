@@ -81,7 +81,7 @@ if [ -f "$CHANGELOG" ]; then
         # Insert the new version compare link if not already present.
         if ! grep -q "\[$VERSION\]:" "$CHANGELOG"; then
             # Find the previous version tag from the changelog.
-            PREV_TAG=$(grep -oP '^\[\d+\.\d+\.\d+\]' "$CHANGELOG" | head -2 | tail -1 | tr -d '[]')
+            PREV_TAG=$(grep -o '^\[[0-9][0-9]*\.[0-9][0-9]*\.[0-9][0-9]*\]' "$CHANGELOG" | head -2 | tail -1 | tr -d '[]')
             if [ -n "$PREV_TAG" ]; then
                 sed -i '' "/^\[Unreleased\]:/a\\
 [$VERSION]: https://github.com/$REPO/compare/v$PREV_TAG...$TAG" "$CHANGELOG"

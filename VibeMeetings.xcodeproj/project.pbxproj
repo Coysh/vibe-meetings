@@ -22,6 +22,12 @@
 		4FCAC1AE2FB3338300AC4E2E /* DockIconManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4FCAC1AD2FB3338300AC4E2E /* DockIconManager.swift */; };
 		4FCAC1B02FB333CC00AC4E2E /* PostRecordingSheet.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4FCAC1AF2FB333CC00AC4E2E /* PostRecordingSheet.swift */; };
 		4FCAC1B22FB3372500AC4E2E /* MeetingEndDetector.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4FCAC1B12FB3372500AC4E2E /* MeetingEndDetector.swift */; };
+		4FCAC1B52FB3726600AC4E2E /* DashboardView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4FCAC1B42FB3726600AC4E2E /* DashboardView.swift */; };
+		4FCAC1B72FB512CC00AC4E2E /* chat.system.md in Resources */ = {isa = PBXBuildFile; fileRef = 4FCAC1B62FB512CC00AC4E2E /* chat.system.md */; };
+		4FCAC1B92FB512EB00AC4E2E /* MeetingChatService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4FCAC1B82FB512EB00AC4E2E /* MeetingChatService.swift */; };
+		4FCAC1BC2FB5131400AC4E2E /* MeetingChatView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4FCAC1BB2FB5131400AC4E2E /* MeetingChatView.swift */; };
+		4FCAC1BE2FB513B100AC4E2E /* SparkleUpdater.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4FCAC1BD2FB513B100AC4E2E /* SparkleUpdater.swift */; };
+		4FCAC1C12FB514C900AC4E2E /* Sparkle in Frameworks */ = {isa = PBXBuildFile; productRef = 4FCAC1C02FB514C900AC4E2E /* Sparkle */; };
 		4FE233302FB20C8E006F29C4 /* MicActiveBanner.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4FE2332F2FB20C8D006F29C4 /* MicActiveBanner.swift */; };
 		4FE233322FB20C94006F29C4 /* MeetingEndBanner.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4FE233312FB20C94006F29C4 /* MeetingEndBanner.swift */; };
 		4FE233342FB22E7F006F29C4 /* SummaryGenerationService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4FE233332FB22E7F006F29C4 /* SummaryGenerationService.swift */; };
@@ -59,6 +65,11 @@
 		4FCAC1AD2FB3338300AC4E2E /* DockIconManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DockIconManager.swift; sourceTree = "<group>"; };
 		4FCAC1AF2FB333CC00AC4E2E /* PostRecordingSheet.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PostRecordingSheet.swift; sourceTree = "<group>"; };
 		4FCAC1B12FB3372500AC4E2E /* MeetingEndDetector.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MeetingEndDetector.swift; sourceTree = "<group>"; };
+		4FCAC1B42FB3726600AC4E2E /* DashboardView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DashboardView.swift; sourceTree = "<group>"; };
+		4FCAC1B62FB512CC00AC4E2E /* chat.system.md */ = {isa = PBXFileReference; lastKnownFileType = net.daringfireball.markdown; path = chat.system.md; sourceTree = "<group>"; };
+		4FCAC1B82FB512EB00AC4E2E /* MeetingChatService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MeetingChatService.swift; sourceTree = "<group>"; };
+		4FCAC1BB2FB5131400AC4E2E /* MeetingChatView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MeetingChatView.swift; sourceTree = "<group>"; };
+		4FCAC1BD2FB513B100AC4E2E /* SparkleUpdater.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SparkleUpdater.swift; sourceTree = "<group>"; };
 		4FE2332F2FB20C8D006F29C4 /* MicActiveBanner.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MicActiveBanner.swift; sourceTree = "<group>"; };
 		4FE233312FB20C94006F29C4 /* MeetingEndBanner.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MeetingEndBanner.swift; sourceTree = "<group>"; };
 		4FE233332FB22E7F006F29C4 /* SummaryGenerationService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SummaryGenerationService.swift; sourceTree = "<group>"; };
@@ -94,6 +105,7 @@
 			isa = PBXFrameworksBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				4FCAC1C12FB514C900AC4E2E /* Sparkle in Frameworks */,
 				A79F118D33C0B907C807972B /* VMCore in Frameworks */,
 				AABC42507A708136FC60EACB /* VMRecording in Frameworks */,
 				27C8BA7B47646DDDCDECFD33 /* VMTranscription in Frameworks */,
@@ -126,12 +138,30 @@
 			path = Resources;
 			sourceTree = "<group>";
 		};
+		4FCAC1B32FB3724100AC4E2E /* Dashboard */ = {
+			isa = PBXGroup;
+			children = (
+				4FCAC1B42FB3726600AC4E2E /* DashboardView.swift */,
+			);
+			path = Dashboard;
+			sourceTree = "<group>";
+		};
+		4FCAC1BA2FB5130200AC4E2E /* Chat */ = {
+			isa = PBXGroup;
+			children = (
+				4FCAC1BB2FB5131400AC4E2E /* MeetingChatView.swift */,
+			);
+			path = Chat;
+			sourceTree = "<group>";
+		};
 		4FE233392FB27646006F29C4 /* Services */ = {
 			isa = PBXGroup;
 			children = (
 				4FE2333A2FB2A3A4006F29C4 /* UpdateChecker.swift */,
 				4FCAC1AD2FB3338300AC4E2E /* DockIconManager.swift */,
 				4FCAC1B12FB3372500AC4E2E /* MeetingEndDetector.swift */,
+				4FCAC1B82FB512EB00AC4E2E /* MeetingChatService.swift */,
+				4FCAC1BD2FB513B100AC4E2E /* SparkleUpdater.swift */,
 			);
 			path = Services;
 			sourceTree = "<group>";
@@ -165,6 +195,8 @@
 				3D5504A1F13503170EF9CBB6 /* Recording */,
 				76DAF097AB3E73F47F6238C5 /* Settings */,
 				D4649E9BCBBFF257DCFCB174 /* Sidebar */,
+				4FCAC1B32FB3724100AC4E2E /* Dashboard */,
+				4FCAC1BA2FB5130200AC4E2E /* Chat */,
 			);
 			path = UI;
 			sourceTree = "<group>";
@@ -210,6 +242,7 @@
 			children = (
 				7EA62E384045395DD13967F1 /* action_items.system.md */,
 				51363BA47624D8F309024000 /* summary.system.md */,
+				4FCAC1B62FB512CC00AC4E2E /* chat.system.md */,
 			);
 			path = Prompts;
 			sourceTree = "<group>";
@@ -278,6 +311,7 @@
 				BAB8D0F0146E77D5FB61E695 /* VMSummarization */,
 				99B4BD360F5F40E9ED80865F /* VMStorage */,
 				B3AC476BB41917B26FAFA9BE /* VMCalendar */,
+				4FCAC1C02FB514C900AC4E2E /* Sparkle */,
 			);
 			productName = VibeMeetings;
 			productReference = 789DF11442E4EEA0F916E857 /* VibeMeetings.app */;
@@ -313,6 +347,7 @@
 				9AE82E42D744F56485581B33 /* XCLocalSwiftPackageReference "Packages/VMStorage" */,
 				933FBB087EEE2E7F850CC768 /* XCLocalSwiftPackageReference "Packages/VMSummarization" */,
 				AAA3B03BECFFAB865264E38D /* XCLocalSwiftPackageReference "Packages/VMTranscription" */,
+				4FCAC1BF2FB514C900AC4E2E /* XCRemoteSwiftPackageReference "Sparkle" */,
 			);
 			preferredProjectObjectVersion = 77;
 			productRefGroup = D71A406B17A5D68DB54D5306 /* Products */;
@@ -333,6 +368,7 @@
 				4712172DDB64E37CEF645D4F /* Preview Assets.xcassets in Resources */,
 				5B07BADDE5CEF68FC35314DF /* action_items.system.md in Resources */,
 				2F4D17A0DE4399141F81DA25 /* summary.system.md in Resources */,
+				4FCAC1B72FB512CC00AC4E2E /* chat.system.md in Resources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -345,6 +381,7 @@
 			files = (
 				4FE2333B2FB2A3A4006F29C4 /* UpdateChecker.swift in Sources */,
 				676EB16AF871EDC219B9033D /* AppEnvironment.swift in Sources */,
+				4FCAC1BC2FB5131400AC4E2E /* MeetingChatView.swift in Sources */,
 				D2233B040A885F22FD2A2ACD /* AudioPlaybackView.swift in Sources */,
 				4FCAC1B02FB333CC00AC4E2E /* PostRecordingSheet.swift in Sources */,
 				655737F486FFA44CD6422CD7 /* BannerCoordinator.swift in Sources */,
@@ -352,6 +389,7 @@
 				4FE233322FB20C94006F29C4 /* MeetingEndBanner.swift in Sources */,
 				2DFACC0EBC269755DAC6E048 /* CalendarSettingsView.swift in Sources */,
 				4FE233342FB22E7F006F29C4 /* SummaryGenerationService.swift in Sources */,
+				4FCAC1B92FB512EB00AC4E2E /* MeetingChatService.swift in Sources */,
 				4FCAC1B22FB3372500AC4E2E /* MeetingEndDetector.swift in Sources */,
 				2B328E480C6222351A847A2D /* FolderTreeView.swift in Sources */,
 				96E163FEDE0D952716940DF4 /* MeetingDetailView.swift in Sources */,
@@ -363,11 +401,13 @@
 				4FCAC1AE2FB3338300AC4E2E /* DockIconManager.swift in Sources */,
 				1ACD1614D2868F7F656CC41C /* RecordingBarView.swift in Sources */,
 				4FE233362FB22ECD006F29C4 /* MeetingMetadataEditor.swift in Sources */,
+				4FCAC1BE2FB513B100AC4E2E /* SparkleUpdater.swift in Sources */,
 				DAFBA525419AC3593E15C652 /* RootView.swift in Sources */,
 				4DFF5E1860DA6ED91537024A /* SettingsView.swift in Sources */,
 				4FE233382FB233D9006F29C4 /* MeetingTriageView.swift in Sources */,
 				3CD5B0718CDC4F204DD82E01 /* SidebarSelection.swift in Sources */,
 				33FFE4F5B4CA492FAF04C343 /* SuggestionBanner.swift in Sources */,
+				4FCAC1B52FB3726600AC4E2E /* DashboardView.swift in Sources */,
 				D64043B5A83483AE80CD1626 /* SummaryView.swift in Sources */,
 				3A6AF8EABE44CB002FB13860 /* TranscriptView.swift in Sources */,
 				F480CC67A2DFAB5C5AA8A0CE /* VibeMeetingsApp.swift in Sources */,
@@ -600,7 +640,23 @@
 		};
 /* End XCLocalSwiftPackageReference section */
 
+/* Begin XCRemoteSwiftPackageReference section */
+		4FCAC1BF2FB514C900AC4E2E /* XCRemoteSwiftPackageReference "Sparkle" */ = {
+			isa = XCRemoteSwiftPackageReference;
+			repositoryURL = "https://github.com/sparkle-project/Sparkle";
+			requirement = {
+				kind = upToNextMajorVersion;
+				minimumVersion = 2.9.1;
+			};
+		};
+/* End XCRemoteSwiftPackageReference section */
+
 /* Begin XCSwiftPackageProductDependency section */
+		4FCAC1C02FB514C900AC4E2E /* Sparkle */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = 4FCAC1BF2FB514C900AC4E2E /* XCRemoteSwiftPackageReference "Sparkle" */;
+			productName = Sparkle;
+		};
 		88DB33C6801D1908FC092EAF /* VMCore */ = {
 			isa = XCSwiftPackageProductDependency;
 			productName = VMCore;

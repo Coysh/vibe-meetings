@@ -232,6 +232,26 @@ public enum FolderTreeScanner {
         }
     }
 
+    /// Walks the tree to map `lowercased org name → parent folder URL`.
+    /// Used to auto-route meetings with a given org into the correct folder.
+    /// The most-recent meeting wins on conflict.
+    public static func indexOrgFolders(in node: FolderNode) -> [String: URL] {
+        struct Entry { let url: URL; let started: Date }
+        var idx: [String: Entry] = [:]
+        var stack: [FolderNode] = [node]
+        while let n = stack.popLast() {
+            if n.isMeeting, let m = n.meeting, let org = m.org, !org.isEmpty {
+                let parent = n.url.deletingLastPathComponent()
+                let key = org.lowercased()
+                if let existing = idx[key], existing.started > m.startedAt { continue }
+                idx[key] = Entry(url: parent, started: m.startedAt)
+            } else {
+                stack.append(contentsOf: n.children)
+            }
+        }
+        return idx.mapValues { $0.url }
+    }
+
     /// Walks the tree to map `lowercased person name → parent folder URL` for 1:1 meetings.
     /// Used to auto-route future 1:1s with the same person into the same parent folder.
     /// The most-recent meeting wins on conflict.

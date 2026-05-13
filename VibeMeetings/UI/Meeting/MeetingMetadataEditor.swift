@@ -1,24 +1,42 @@
 import SwiftUI
 import VMCore
 
-/// A popover form for editing meeting metadata (type, org, attendees, labels).
+/// A form for editing meeting metadata (type, org, attendees, labels).
 struct MeetingMetadataEditor: View {
     @Binding var meeting: Meeting
+    let knownOrgs: [String]
     let onSave: (Meeting) -> Void
 
     @State private var selectedType: MeetingType
-    @State private var orgText: String
+    @State private var selectedOrg: String
+    @State private var customOrgText: String
     @State private var attendeesText: String
     @State private var labelsText: String
 
     @Environment(\.dismiss) private var dismiss
 
-    init(meeting: Binding<Meeting>, onSave: @escaping (Meeting) -> Void) {
+    private static let customOrgTag = "__custom__"
+
+    init(meeting: Binding<Meeting>, knownOrgs: [String], onSave: @escaping (Meeting) -> Void) {
         self._meeting = meeting
+        self.knownOrgs = knownOrgs
         self.onSave = onSave
         let m = meeting.wrappedValue
         _selectedType = State(initialValue: m.resolvedType)
-        _orgText = State(initialValue: m.org ?? "")
+
+        // Determine if the current org matches a known value or is custom.
+        let currentOrg = m.org ?? ""
+        if currentOrg.isEmpty {
+            _selectedOrg = State(initialValue: knownOrgs.first ?? "")
+            _customOrgText = State(initialValue: "")
+        } else if knownOrgs.contains(where: { $0.caseInsensitiveCompare(currentOrg) == .orderedSame }) {
+            _selectedOrg = State(initialValue: knownOrgs.first(where: { $0.caseInsensitiveCompare(currentOrg) == .orderedSame }) ?? currentOrg)
+            _customOrgText = State(initialValue: "")
+        } else {
+            _selectedOrg = State(initialValue: Self.customOrgTag)
+            _customOrgText = State(initialValue: currentOrg)
+        }
+
         _attendeesText = State(initialValue: (m.attendees ?? []).joined(separator: ", "))
         _labelsText = State(initialValue: (m.labels ?? []).joined(separator: ", "))
     }
@@ -39,12 +57,27 @@ struct MeetingMetadataEditor: View {
                 .frame(width: 200)
             }
 
-            // Org
+            // Org picker
             HStack {
                 Text("Org")
                     .frame(width: 80, alignment: .trailing)
-                TextField("e.g. EA, Marketing", text: $orgText)
-                    .textFieldStyle(.roundedBorder)
+                Picker("", selection: $selectedOrg) {
+                    ForEach(knownOrgs, id: \.self) { org in
+                        Text(org).tag(org)
+                    }
+                    Divider()
+                    Text("Other…").tag(Self.customOrgTag)
+                }
+                .frame(width: 220)
+            }
+
+            if selectedOrg == Self.customOrgTag {
+                HStack {
+                    Text("")
+                        .frame(width: 80, alignment: .trailing)
+                    TextField("Custom org name", text: $customOrgText)
+                        .textFieldStyle(.roundedBorder)
+                }
             }
 
             // Attendees
@@ -80,7 +113,12 @@ struct MeetingMetadataEditor: View {
         var updated = meeting
         updated.meetingType = selectedType
 
-        let org = orgText.trimmingCharacters(in: .whitespacesAndNewlines)
+        let org: String
+        if selectedOrg == Self.customOrgTag {
+            org = customOrgText.trimmingCharacters(in: .whitespacesAndNewlines)
+        } else {
+            org = selectedOrg
+        }
         updated.org = org.isEmpty ? nil : org
 
         let attendees = attendeesText

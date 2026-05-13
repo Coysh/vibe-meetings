@@ -7,11 +7,17 @@ import Observation
 @MainActor
 final class UpdateChecker {
     private static let repoKey = "VibeMeetings.GitHubRepo"
+    private static let tokenKey = "VibeMeetings.GitHubToken"
     private static let dismissedVersionKey = "VibeMeetings.DismissedUpdateVersion"
 
     /// GitHub "owner/repo" — configured in Settings.
     var githubRepo: String {
         didSet { UserDefaults.standard.set(githubRepo, forKey: Self.repoKey) }
+    }
+
+    /// Personal access token for private repos. Leave empty for public repos.
+    var githubToken: String {
+        didSet { UserDefaults.standard.set(githubToken, forKey: Self.tokenKey) }
     }
 
     /// Latest available release info, if newer than the running version.
@@ -33,6 +39,7 @@ final class UpdateChecker {
 
     init() {
         self.githubRepo = UserDefaults.standard.string(forKey: Self.repoKey) ?? ""
+        self.githubToken = UserDefaults.standard.string(forKey: Self.tokenKey) ?? ""
     }
 
     /// Check GitHub for a newer release. Safe to call multiple times; no-ops if
@@ -78,6 +85,10 @@ final class UpdateChecker {
         let url = URL(string: "https://api.github.com/repos/\(repo)/releases/latest")!
         var req = URLRequest(url: url)
         req.setValue("application/vnd.github+json", forHTTPHeaderField: "Accept")
+        let token = await githubToken.trimmingCharacters(in: .whitespacesAndNewlines)
+        if !token.isEmpty {
+            req.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
+        }
         req.timeoutInterval = 15
 
         let (data, response) = try await URLSession.shared.data(for: req)

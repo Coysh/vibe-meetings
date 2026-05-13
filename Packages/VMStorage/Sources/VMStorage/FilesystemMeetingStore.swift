@@ -8,6 +8,7 @@ public actor FilesystemMeetingStore: MeetingStore {
     private var meetingIndex: [UUID: URL] = [:]
     private var seriesIndex: [String: URL] = [:]   // calendarSeriesID → parent folder URL
     private var personIndex: [String: URL] = [:]   // lowercased person name → parent folder URL
+    private var orgIndex: [String: URL] = [:]      // lowercased org name → folder URL
     private var watcher: FolderWatcher?
     private var subscribers: [UUID: AsyncStream<FolderNode>.Continuation] = [:]
 
@@ -28,6 +29,7 @@ public actor FilesystemMeetingStore: MeetingStore {
         self.meetingIndex = FolderTreeScanner.indexMeetings(in: self.cachedTree)
         self.seriesIndex = FolderTreeScanner.indexSeries(in: self.cachedTree)
         self.personIndex = FolderTreeScanner.indexPersonFolders(in: self.cachedTree)
+        self.orgIndex = FolderTreeScanner.indexOrgFolders(in: self.cachedTree)
         Task { await self.startWatching() }
     }
 
@@ -65,6 +67,7 @@ public actor FilesystemMeetingStore: MeetingStore {
         meetingIndex = FolderTreeScanner.indexMeetings(in: cachedTree)
         seriesIndex = FolderTreeScanner.indexSeries(in: cachedTree)
         personIndex = FolderTreeScanner.indexPersonFolders(in: cachedTree)
+        orgIndex = FolderTreeScanner.indexOrgFolders(in: cachedTree)
         for (_, c) in subscribers { c.yield(cachedTree) }
     }
 
@@ -74,8 +77,25 @@ public actor FilesystemMeetingStore: MeetingStore {
     }
 
     public func folderForPerson(_ name: String) async -> FolderNode? {
-        guard let url = personIndex[name.lowercased()] else { return nil }
-        return findNode(at: url, in: cachedTree)
+        if let url = personIndex[name.lowercased()] {
+            return findNode(at: url, in: cachedTree)
+        }
+        // Fallback: search by folder name.
+        if let url = findFolderByName(matching: name, in: cachedTree) {
+            return findNode(at: url, in: cachedTree)
+        }
+        return nil
+    }
+
+    public func folderForOrg(_ name: String) async -> FolderNode? {
+        if let url = orgIndex[name.lowercased()] {
+            return findNode(at: url, in: cachedTree)
+        }
+        // Fallback: search by folder name.
+        if let url = findFolderByName(matching: name, in: cachedTree) {
+            return findNode(at: url, in: cachedTree)
+        }
+        return nil
     }
 
     private func findNode(at url: URL, in node: FolderNode) -> FolderNode? {
@@ -178,9 +198,11 @@ public actor FilesystemMeetingStore: MeetingStore {
     }
 
     public func updateMeeting(_ meeting: Meeting) async throws {
-        guard let url = meetingIndex[meeting.id] else {
+        guard var url = meetingIndex[meeting.id] else {
             throw MeetingStoreError.meetingNotFound(meeting.id)
         }
+
+        // Write updated metadata first (so folder rename picks up new fields).
         let mf = MeetingFolder(url: url)
         try FolderTreeScanner.writeMeeting(meeting, to: mf.metadataURL)
 
@@ -195,6 +217,50 @@ public actor FilesystemMeetingStore: MeetingStore {
             notes: notes
         )
         try AtomicWriter.write(Data(md.utf8), to: mf.transcriptURL)
+
+        // Auto-move based on person (for 1:1s) or org.
+        // For 1:1 meetings, person folder takes priority over org folder.
+        let currentParent = url.deletingLastPathComponent()
+        var targetFolder: URL?
+
+        // 1. Person-based routing for 1:1s — highest priority.
+        if let person = meeting.person, !person.isEmpty {
+            if let personFolder = personIndex[person.lowercased()] {
+                targetFolder = personFolder
+            } else {
+                targetFolder = findFolderByName(matching: person, in: cachedTree)
+            }
+        }
+
+        // 2. Org-based routing (only if person routing didn't match).
+        if targetFolder == nil, let org = meeting.org, !org.isEmpty {
+            if let orgFolder = orgIndex[org.lowercased()] {
+                targetFolder = orgFolder
+            } else {
+                targetFolder = findFolderByName(matching: org, in: cachedTree)
+            }
+        }
+
+        // Move if we found a target that differs from the current parent.
+        if let targetFolder,
+           targetFolder.standardizedFileURL != currentParent.standardizedFileURL {
+            let dest = uniqueURL(parent: targetFolder, base: url.lastPathComponent)
+            try FileManager.default.moveItem(at: url, to: dest)
+            url = dest
+            meetingIndex[meeting.id] = dest
+            try updateFolderRelativePath(for: meeting, at: dest)
+        }
+
+        // Rename the folder to match updated metadata (person name, title, etc.).
+        let expectedName = meetingFolderName(for: meeting)
+        let parent = url.deletingLastPathComponent()
+        if expectedName != url.lastPathComponent {
+            let dest = uniqueURL(parent: parent, base: expectedName)
+            try FileManager.default.moveItem(at: url, to: dest)
+            meetingIndex[meeting.id] = dest
+            try updateFolderRelativePath(for: meeting, at: dest)
+        }
+
         broadcast()
     }
 
@@ -268,6 +334,22 @@ public actor FilesystemMeetingStore: MeetingStore {
         let notes = loadBodyIfExists(mf.notesURL)
         let md = MarkdownTranscriptWriter.render(meeting: meeting, segments: finals, summary: summary, notes: notes)
         try AtomicWriter.write(Data(md.utf8), to: mf.transcriptURL)
+    }
+
+    public func importRawTranscript(_ text: String, for id: UUID) async throws {
+        guard let url = meetingIndex[id] else { throw MeetingStoreError.meetingNotFound(id) }
+        let mf = MeetingFolder(url: url)
+        // Write the raw text directly to transcript.md.
+        try AtomicWriter.write(Data(text.utf8), to: mf.transcriptURL)
+        // Create a single segment so the summary generator can consume it.
+        let segment = TranscriptSegment(
+            speakerId: Speaker.others.id,
+            channel: .mixed,
+            start: 0,
+            end: 0,
+            text: text
+        )
+        try SegmentsFile.save([segment], to: mf.segmentsURL)
     }
 
     public func writeSummary(_ markdown: String, for id: UUID) async throws {
@@ -385,5 +467,32 @@ public actor FilesystemMeetingStore: MeetingStore {
     private func loadBodyIfExists(_ url: URL) -> String? {
         guard FileManager.default.fileExists(atPath: url.path) else { return nil }
         return try? String(contentsOf: url, encoding: .utf8)
+    }
+
+    /// Searches the folder tree for a non-meeting folder whose name matches
+    /// `query` (case-insensitive). Used as a fallback when the person/org
+    /// indexes have no entry yet — e.g. "Theresa" matches "10 One-to-Ones/Theresa/".
+    private func findFolderByName(matching query: String, in node: FolderNode) -> URL? {
+        let lower = query.lowercased()
+        var stack: [FolderNode] = [node]
+        while let n = stack.popLast() {
+            guard !n.isMeeting else { continue }
+            // Match folder name exactly (case-insensitive).
+            if n.name.lowercased() == lower { return n.url }
+            // Also match slug form: "Coysh Digital" matches "30-Coysh-Digital-Meetings".
+            let slug = slugify(query)
+            if !slug.isEmpty && n.name.lowercased().contains(slug) { return n.url }
+            stack.append(contentsOf: n.children)
+        }
+        return nil
+    }
+
+    /// Updates the `folderRelativePath` in meeting.json after a move/rename.
+    private func updateFolderRelativePath(for meeting: Meeting, at newURL: URL) throws {
+        let newRelPath = newURL.path.replacingOccurrences(of: rootURL.path + "/", with: "")
+        var updated = meeting
+        updated.folderRelativePath = newRelPath
+        let mf = MeetingFolder(url: newURL)
+        try FolderTreeScanner.writeMeeting(updated, to: mf.metadataURL)
     }
 }

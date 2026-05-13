@@ -11,8 +11,9 @@ struct MeetingDetailView: View {
     @State private var summary: String = ""
     @State private var notes: String = ""
     @State private var selectedTab: Tab = .transcript
-    @State private var showingMetadataEditor = false
     @State private var editableMeeting: Meeting?
+    @State private var showImportTranscript = false
+    @State private var importTranscriptText = ""
 
     enum Tab: String, CaseIterable, Identifiable {
         case transcript, notes, summary, audio
@@ -56,13 +57,29 @@ struct MeetingDetailView: View {
                 Group {
                     switch selectedTab {
                     case .transcript:
-                        TranscriptView(segments: displaySegments, participants: handle.meeting.participants)
+                        VStack(spacing: 0) {
+                            TranscriptView(segments: displaySegments, participants: handle.meeting.participants, meeting: handle.meeting)
+                            Divider()
+                            HStack {
+                                Spacer()
+                                Button {
+                                    importTranscriptText = ""
+                                    showImportTranscript = true
+                                } label: {
+                                    Label("Import Transcript", systemImage: "square.and.arrow.down")
+                                }
+                                .buttonStyle(.bordered)
+                                .controlSize(.small)
+                                .help("Replace transcript with pasted text from another tool")
+                                .padding(8)
+                            }
+                        }
                     case .notes:
                         notesTab(meeting: handle.meeting)
                     case .summary:
                         summaryTab(meeting: handle.meeting)
                     case .audio:
-                        AudioPlaybackView(audioURL: handle.audioURL)
+                        audioTab(handle: handle)
                     }
                 }
             } else {
@@ -76,6 +93,29 @@ struct MeetingDetailView: View {
             // When recording stops the controller is nilled out; reload the
             // now-persisted transcript so it replaces the (stale) live view.
             Task { await load() }
+        }
+        .sheet(item: $editableMeeting) { meeting in
+            MeetingMetadataEditor(
+                meeting: Binding(
+                    get: { editableMeeting ?? meeting },
+                    set: { editableMeeting = $0 }
+                ),
+                knownOrgs: env.configuredOrgs,
+                onSave: { updated in
+                    Task {
+                        try? await env.meetingStore.updateMeeting(updated)
+                        await load()
+                    }
+                }
+            )
+        }
+        .sheet(isPresented: $showImportTranscript) {
+            ImportTranscriptSheet(text: $importTranscriptText) {
+                Task {
+                    try? await env.meetingStore.importRawTranscript(importTranscriptText, for: meetingID)
+                    await load()
+                }
+            }
         }
     }
 
@@ -119,27 +159,10 @@ struct MeetingDetailView: View {
                 // Edit metadata button
                 Button {
                     editableMeeting = meeting
-                    showingMetadataEditor = true
                 } label: {
-                    Image(systemName: "pencil.circle")
+                    Label("Edit", systemImage: "pencil.circle")
                 }
                 .buttonStyle(.bordered)
-                .popover(isPresented: $showingMetadataEditor) {
-                    if var editable = editableMeeting {
-                        MeetingMetadataEditor(
-                            meeting: Binding(
-                                get: { editable },
-                                set: { editable = $0 }
-                            ),
-                            onSave: { updated in
-                                Task {
-                                    try? await env.meetingStore.updateMeeting(updated)
-                                    await load()
-                                }
-                            }
-                        )
-                    }
-                }
 
                 // Show Resume button when meeting has ended and no other recording is active.
                 if meeting.endedAt != nil && env.activeRecordingController == nil {
@@ -280,6 +303,28 @@ struct MeetingDetailView: View {
         }
     }
 
+    @ViewBuilder
+    private func audioTab(handle: MeetingHandle) -> some View {
+        let folder = MeetingFolder(url: handle.folderURL)
+        let cleanedExists = FileManager.default.fileExists(atPath: folder.cleanedAudioURL.path)
+        VStack(spacing: 0) {
+            if cleanedExists {
+                // Show both players with labels.
+                VStack(spacing: 16) {
+                    GroupBox("Echo-reduced (mic only)") {
+                        AudioPlaybackView(audioURL: folder.cleanedAudioURL)
+                    }
+                    GroupBox("Original (stereo)") {
+                        AudioPlaybackView(audioURL: handle.audioURL)
+                    }
+                }
+                .padding()
+            } else {
+                AudioPlaybackView(audioURL: handle.audioURL)
+            }
+        }
+    }
+
     private func generateSummary(meeting: Meeting) {
         let segs = displaySegments
         guard !segs.isEmpty else { return }
@@ -324,5 +369,46 @@ struct MeetingDetailView: View {
         } catch {
             print("Could not load meeting \(meetingID): \(error)")
         }
+    }
+}
+
+private struct ImportTranscriptSheet: View {
+    @Binding var text: String
+    let onImport: () -> Void
+    @Environment(\.dismiss) private var dismiss
+
+    var body: some View {
+        VStack(spacing: 16) {
+            HStack {
+                Text("Import Transcript")
+                    .font(.headline)
+                Spacer()
+                Button("Cancel") { dismiss() }
+                    .buttonStyle(.bordered)
+            }
+
+            Text("Paste a transcript from another tool below. This will replace the existing transcript and allow you to generate a summary from it.")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+
+            TextEditor(text: $text)
+                .font(.system(.body, design: .monospaced))
+                .scrollContentBackground(.hidden)
+                .padding(8)
+                .background(.fill.quaternary, in: RoundedRectangle(cornerRadius: 8))
+                .frame(minHeight: 300)
+
+            HStack {
+                Spacer()
+                Button("Import") {
+                    onImport()
+                    dismiss()
+                }
+                .buttonStyle(.borderedProminent)
+                .disabled(text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+            }
+        }
+        .padding()
+        .frame(minWidth: 600, minHeight: 450)
     }
 }

@@ -10,6 +10,7 @@ public struct MeetingFolder: Sendable {
     public static let summaryFilename = "summary.md"
     public static let segmentsFilename = "segments.json"
     public static let audioFilename = "audio.m4a"
+    public static let cleanedAudioFilename = "audio-cleaned.m4a"
     public static let notesFilename = "notes.md"
 
     public let url: URL
@@ -21,6 +22,7 @@ public struct MeetingFolder: Sendable {
     public var summaryURL: URL { url.appendingPathComponent(Self.summaryFilename) }
     public var segmentsURL: URL { url.appendingPathComponent(Self.segmentsFilename) }
     public var audioURL: URL { url.appendingPathComponent(Self.audioFilename) }
+    public var cleanedAudioURL: URL { url.appendingPathComponent(Self.cleanedAudioFilename) }
     public var notesURL: URL { url.appendingPathComponent(Self.notesFilename) }
 
     public var isMeeting: Bool {

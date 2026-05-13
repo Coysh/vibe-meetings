@@ -73,7 +73,10 @@ public enum AudioEchoReducer {
             outBuffer.floatChannelData![0].update(from: src.baseAddress!, count: cleaned.count)
         }
 
-        // Write as M4A (AAC).
+        // Write as M4A (AAC). The AAC encoder inside AVAudioFile has a
+        // limited internal buffer, so we write in small chunks rather than
+        // one giant buffer (which can produce a file with valid container
+        // metadata but empty/corrupt audio frames).
         let settings: [String: Any] = [
             AVFormatIDKey: kAudioFormatMPEG4AAC,
             AVSampleRateKey: sampleRate,
@@ -88,8 +91,26 @@ public enum AudioEchoReducer {
                 commonFormat: .pcmFormatFloat32,
                 interleaved: false
             )
-            try outFile.write(from: outBuffer)
-            print("[EchoReducer] Wrote cleaned audio: \(cleaned.count) samples")
+
+            // Write in chunks of ~0.5 s to keep the AAC encoder happy.
+            let chunkSize = AVAudioFrameCount(sampleRate * 0.5)
+            var offset: AVAudioFrameCount = 0
+            let totalFrames = outBuffer.frameLength
+            while offset < totalFrames {
+                let remaining = totalFrames - offset
+                let framesToWrite = min(chunkSize, remaining)
+                guard let chunk = AVAudioPCMBuffer(
+                    pcmFormat: monoFormat,
+                    frameCapacity: framesToWrite
+                ) else { break }
+                chunk.frameLength = framesToWrite
+                let src = outBuffer.floatChannelData![0].advanced(by: Int(offset))
+                chunk.floatChannelData![0].update(from: src, count: Int(framesToWrite))
+                try outFile.write(from: chunk)
+                offset += framesToWrite
+            }
+
+            print("[EchoReducer] Wrote cleaned audio: \(cleaned.count) samples (\(offset) frames written)")
             return true
         } catch {
             print("[EchoReducer] Write error: \(error)")

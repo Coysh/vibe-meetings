@@ -1,3 +1,4 @@
+import ServiceManagement
 import SwiftUI
 import VMCore
 import VMRecording
@@ -20,6 +21,8 @@ struct SettingsView: View {
 private struct GeneralSettingsView: View {
     @Environment(AppEnvironment.self) private var env
     @State private var inputDevices: [AudioInputDevice] = AudioDeviceEnumerator.inputDevices()
+    @State private var launchAtLogin: Bool = SMAppService.mainApp.status == .enabled
+    @State private var newOrgName: String = ""
 
     /// Binding that maps `nil` (system default) ↔ empty string for the Picker.
     private var micSelection: Binding<String> {
@@ -31,6 +34,21 @@ private struct GeneralSettingsView: View {
 
     var body: some View {
         Form {
+            Toggle("Launch at login", isOn: $launchAtLogin)
+                .onChange(of: launchAtLogin) { _, enabled in
+                    do {
+                        if enabled {
+                            try SMAppService.mainApp.register()
+                        } else {
+                            try SMAppService.mainApp.unregister()
+                        }
+                    } catch {
+                        print("[Settings] Launch at login error: \(error)")
+                        // Revert toggle on failure.
+                        launchAtLogin = SMAppService.mainApp.status == .enabled
+                    }
+                }
+
             LabeledContent("Meetings folder") {
                 HStack {
                     Text(env.rootURL.path).truncationMode(.middle)
@@ -92,33 +110,64 @@ private struct GeneralSettingsView: View {
                 }
             }
 
-            Section("Updates") {
-                TextField("GitHub repo (owner/repo)", text: Binding(
-                    get: { env.updateChecker.githubRepo },
-                    set: { env.updateChecker.githubRepo = $0 }
-                ), prompt: Text("e.g. timcoysh/vibe-meetings"))
-                .textFieldStyle(.roundedBorder)
-
-                HStack {
-                    Button("Check now") {
-                        Task { await env.updateChecker.checkForUpdates() }
-                    }
-                    .disabled(env.updateChecker.isChecking || env.updateChecker.githubRepo.isEmpty)
-
-                    if env.updateChecker.isChecking {
-                        ProgressView().controlSize(.small)
-                    }
-
-                    if let update = env.updateChecker.availableUpdate {
-                        Label("v\(update.version) available", systemImage: "arrow.down.app.fill")
-                            .font(.caption)
-                            .foregroundStyle(.blue)
-                    } else if let error = env.updateChecker.checkError {
-                        Label(error, systemImage: "xmark.circle")
-                            .font(.caption)
-                            .foregroundStyle(.red)
+            Section("Organizations") {
+                ForEach(env.configuredOrgs, id: \.self) { org in
+                    HStack {
+                        Text(org)
+                        Spacer()
+                        Button {
+                            var orgs = env.configuredOrgs
+                            orgs.removeAll { $0 == org }
+                            env.setConfiguredOrgs(orgs)
+                        } label: {
+                            Image(systemName: "minus.circle.fill")
+                                .foregroundStyle(.red)
+                        }
+                        .buttonStyle(.borderless)
                     }
                 }
+
+                HStack {
+                    TextField("New organization", text: $newOrgName)
+                        .textFieldStyle(.roundedBorder)
+                    Button {
+                        let name = newOrgName.trimmingCharacters(in: .whitespacesAndNewlines)
+                        guard !name.isEmpty else { return }
+                        var orgs = env.configuredOrgs
+                        if !orgs.contains(where: { $0.caseInsensitiveCompare(name) == .orderedSame }) {
+                            orgs.append(name)
+                            env.setConfiguredOrgs(orgs)
+                        }
+                        newOrgName = ""
+                    } label: {
+                        Image(systemName: "plus.circle.fill")
+                            .foregroundStyle(.green)
+                    }
+                    .buttonStyle(.borderless)
+                    .disabled(newOrgName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+                }
+
+                Text("Organizations available in the meeting metadata picker. The first org is used as the default for new meetings.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+
+            Section("Updates") {
+                HStack {
+                    Button("Check for Updates") {
+                        env.sparkleUpdater.checkForUpdates()
+                    }
+                    .disabled(!env.sparkleUpdater.canCheckForUpdates)
+                }
+
+                Toggle("Automatically check for updates", isOn: Binding(
+                    get: { env.sparkleUpdater.automaticallyChecksForUpdates },
+                    set: { env.sparkleUpdater.automaticallyChecksForUpdates = $0 }
+                ))
+
+                Text("Updates are delivered via Sparkle and checked securely against the appcast feed.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
             }
         }
         .padding()

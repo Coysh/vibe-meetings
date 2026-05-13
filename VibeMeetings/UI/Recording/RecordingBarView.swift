@@ -180,6 +180,18 @@ final class RecordingController {
             try? FolderTreeScanner.writeMeeting(updated, to: MeetingFolder(url: handle.folderURL).metadataURL)
         }
         state = .idle
+
+        // Post-process: echo reduction in the background (fire-and-forget).
+        if let handle = meetingHandle {
+            let folder = MeetingFolder(url: handle.folderURL)
+            let inputURL = folder.audioURL
+            let outputURL = folder.cleanedAudioURL
+            Task.detached(priority: .utility) {
+                let ok = await AudioEchoReducer.reduceEcho(inputURL: inputURL, outputURL: outputURL)
+                print("[RecordingController] Echo reduction \(ok ? "succeeded" : "skipped/failed")")
+            }
+        }
+
         // NOTE: The caller (RootView) is responsible for clearing
         // env.activeRecordingController and showing the post-recording sheet.
         // This allows the caller to read meetingHandle before it's lost.
@@ -192,6 +204,7 @@ final class RecordingController {
 struct RecordingBarView: View {
     @Bindable var controller: RecordingController
     var onStopped: (() -> Void)?
+    var onNavigateToMeeting: (() -> Void)?
     @State private var showNotes = false
 
     var body: some View {
@@ -208,6 +221,19 @@ struct RecordingBarView: View {
                     Image(systemName: "exclamationmark.triangle.fill").foregroundStyle(.orange)
                     Text(msg).font(.caption).foregroundStyle(.orange).lineLimit(1)
                 } else {
+                    // Meeting title — clickable to navigate to the live transcript.
+                    if let title = controller.meetingHandle?.meeting.title {
+                        Button {
+                            onNavigateToMeeting?()
+                        } label: {
+                            Text(title)
+                                .font(.callout.bold())
+                                .lineLimit(1)
+                        }
+                        .buttonStyle(.plain)
+                        .help("Show live transcript")
+                    }
+
                     Text(controller.elapsed.formattedTimestamp)
                         .font(.title3.monospacedDigit())
                     LevelMeterView(level: controller.micLevel, label: "You")

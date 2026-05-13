@@ -130,11 +130,16 @@ public protocol MeetingStore: Sendable {
     /// matches. Used to auto-route future 1:1s with the same person.
     func folderForPerson(_ name: String) async -> FolderNode?
 
+    /// Looks up the folder associated with an org name.
+    /// Used to auto-route meetings for a specific org into the correct folder.
+    func folderForOrg(_ name: String) async -> FolderNode?
+
     /// Update meeting metadata in place and re-render transcript.md.
     func updateMeeting(_ meeting: Meeting) async throws
 
     func appendSegments(_ segs: [TranscriptSegment], to id: UUID) async throws
     func replaceTranscript(_ segs: [TranscriptSegment], for id: UUID) async throws
+    func importRawTranscript(_ text: String, for id: UUID) async throws
     func writeSummary(_ markdown: String, for id: UUID) async throws
     func writeNotes(_ text: String, for id: UUID) async throws
     func loadTranscript(for id: UUID) async throws -> [TranscriptSegment]

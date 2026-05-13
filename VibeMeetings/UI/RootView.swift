@@ -9,6 +9,7 @@ struct RootView: View {
     @State private var newMeetingSheet = false
     @State private var preselectedEventID: String?
     @State private var showTriageSheet = false
+    @State private var showChatPanel = false
     @State private var postRecordingMeetingID: UUID?
     @State private var postRecordingFolderURL: URL?
 
@@ -25,6 +26,10 @@ struct RootView: View {
                 if let controller = env.activeRecordingController {
                     RecordingBarView(controller: controller, onStopped: {
                         handleRecordingStopped()
+                    }, onNavigateToMeeting: {
+                        if let id = controller.meetingHandle?.meeting.id {
+                            selection = [.meeting(id)]
+                        }
                     })
                     Divider()
                 }
@@ -33,7 +38,9 @@ struct RootView: View {
                         MeetingDetailView(meetingID: id)
                             .id(id)
                     } else {
-                        EmptyDetailView()
+                        DashboardView { meetingID in
+                            selection = [.meeting(meetingID)]
+                        }
                     }
                 }
             }
@@ -51,6 +58,8 @@ struct RootView: View {
                     }
                     if env.bannerCoordinator.micActiveSuggestion {
                         MicActiveBanner(
+                            eventTitle: env.bannerCoordinator.micEventTitle,
+                            appName: env.bannerCoordinator.micActiveAppName,
                             onStart: {
                                 env.bannerCoordinator.dismissMicSuggestion()
                                 newMeetingSheet = true
@@ -73,9 +82,7 @@ struct RootView: View {
                             onKeep: { env.bannerCoordinator.dismissMeetingEnd() }
                         )
                     }
-                    if let update = env.updateChecker.availableUpdate {
-                        UpdateBanner(release: update, onDismiss: { env.updateChecker.dismissUpdate() })
-                    }
+                    // Sparkle handles update UI natively.
                 }
             }
         }
@@ -89,12 +96,20 @@ struct RootView: View {
             }
             env.bannerCoordinator.setMeetingEndDetector(env.meetingEndDetector)
             env.bannerCoordinator.start()
-            await env.updateChecker.checkForUpdates()
+            // Sparkle handles update checks automatically on launch.
             for await tree in env.meetingStore.tree {
                 env.folderTree = tree
             }
         }
         .toolbar {
+            ToolbarItem(placement: .primaryAction) {
+                Button {
+                    showChatPanel.toggle()
+                } label: {
+                    Label("Chat", systemImage: "bubble.left.and.text.bubble.right")
+                }
+                .help("Ask questions across all meetings")
+            }
             ToolbarItem(placement: .primaryAction) {
                 Button {
                     showTriageSheet = true
@@ -103,6 +118,10 @@ struct RootView: View {
                 }
                 .help("Organise untagged meetings")
             }
+        }
+        .inspector(isPresented: $showChatPanel) {
+            MeetingChatView()
+                .inspectorColumnWidth(min: 320, ideal: 400, max: 500)
         }
         .sheet(isPresented: $showTriageSheet) {
             MeetingTriageView()
@@ -118,7 +137,10 @@ struct RootView: View {
                 }
             }
         }
-        .onReceive(NotificationCenter.default.publisher(for: .newMeetingRequested)) { _ in
+        .onReceive(NotificationCenter.default.publisher(for: .newMeetingRequested)) { notification in
+            if let eventID = notification.userInfo?["preselectedEventID"] as? String {
+                preselectedEventID = eventID
+            }
             newMeetingSheet = true
         }
         .sheet(isPresented: Binding(
@@ -224,46 +246,5 @@ private func findParent(of target: FolderNode, in node: FolderNode) -> FolderNod
     return nil
 }
 
-private struct EmptyDetailView: View {
-    var body: some View {
-        VStack(spacing: 12) {
-            Image(systemName: "waveform.badge.mic")
-                .font(.system(size: 48))
-                .foregroundStyle(.secondary)
-            Text("Select a meeting, or press ⌘N to start a new one.")
-                .foregroundStyle(.secondary)
-        }
-        .frame(maxWidth: .infinity, maxHeight: .infinity)
-    }
-}
 
-struct UpdateBanner: View {
-    let release: UpdateChecker.GitHubRelease
-    let onDismiss: () -> Void
 
-    var body: some View {
-        HStack(spacing: 12) {
-            Image(systemName: "arrow.down.app.fill")
-                .foregroundStyle(.blue)
-            VStack(alignment: .leading, spacing: 2) {
-                Text("Update available: v\(release.version)")
-                    .font(.callout.bold())
-                if !release.body.isEmpty {
-                    Text(release.body.prefix(120) + (release.body.count > 120 ? "…" : ""))
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                        .lineLimit(2)
-                }
-            }
-            Spacer()
-            Link("Download", destination: release.htmlURL)
-                .buttonStyle(.borderedProminent)
-                .controlSize(.small)
-            Button("Dismiss", action: onDismiss)
-                .controlSize(.small)
-        }
-        .padding(.horizontal, 16)
-        .padding(.vertical, 10)
-        .background(.blue.opacity(0.08))
-    }
-}
