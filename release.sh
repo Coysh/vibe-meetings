@@ -273,11 +273,18 @@ git add VibeMeetings/Info.plist
 [ -f appcast.xml ] && git add appcast.xml
 git commit -m "Release $VERSION" --allow-empty 2>/dev/null || true
 
-# ── Tag and push ─────────────────────────────────────────
-echo "==> Tagging $TAG and pushing..."
+# ── Merge into main, tag, and push ───────────────────────
+CURRENT_BRANCH=$(git rev-parse --abbrev-ref HEAD)
+echo "==> Merging into main and tagging $TAG..."
+if [ "$CURRENT_BRANCH" != "main" ]; then
+    git checkout main
+    git merge "$CURRENT_BRANCH" --ff-only || git merge "$CURRENT_BRANCH" --no-edit
+    git checkout "$CURRENT_BRANCH"
+fi
 git tag -f "$TAG"
+echo "==> Pushing main and tag..."
+git push origin main --quiet
 git push origin HEAD --quiet
-git push origin HEAD:main --quiet
 git push origin "$TAG" --force --quiet
 
 # ── Create GitHub release ────────────────────────────────
