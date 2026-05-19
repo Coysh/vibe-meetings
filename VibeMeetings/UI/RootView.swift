@@ -10,6 +10,7 @@ struct RootView: View {
     @State private var preselectedEventID: String?
     @State private var showTriageSheet = false
     @State private var showChatPanel = false
+    @State private var chatFocusedMeetingID: UUID?
     @State private var postRecordingMeetingID: UUID?
     @State private var postRecordingFolderURL: URL?
 
@@ -35,8 +36,11 @@ struct RootView: View {
                 }
                 Group {
                     if let id = selection.firstMeetingID {
-                        MeetingDetailView(meetingID: id)
-                            .id(id)
+                        MeetingDetailView(meetingID: id) { chatMeetingID in
+                            chatFocusedMeetingID = chatMeetingID
+                            showChatPanel = true
+                        }
+                        .id(id)
                     } else {
                         DashboardView { meetingID in
                             selection = [.meeting(meetingID)]
@@ -95,6 +99,11 @@ struct RootView: View {
                 env.activeRecordingController?.linkedCalendarEvent
             }
             env.bannerCoordinator.setMeetingEndDetector(env.meetingEndDetector)
+            env.bannerCoordinator.setNotificationProviders(
+                meetingDetected: { env.notifyMeetingDetected },
+                preMeetingReminder: { env.notifyPreMeetingReminder },
+                reminderMinutes: { env.notifyReminderMinutes }
+            )
             env.bannerCoordinator.start()
             // Sparkle handles update checks automatically on launch.
             for await tree in env.meetingStore.tree {
@@ -102,8 +111,18 @@ struct RootView: View {
             }
         }
         .toolbar {
+            ToolbarItem(placement: .navigation) {
+                Button {
+                    selection = []
+                } label: {
+                    Label("Home", systemImage: "house")
+                }
+                .help("Back to dashboard")
+                .disabled(selection.isEmpty)
+            }
             ToolbarItem(placement: .primaryAction) {
                 Button {
+                    chatFocusedMeetingID = nil
                     showChatPanel.toggle()
                 } label: {
                     Label("Chat", systemImage: "bubble.left.and.text.bubble.right")
@@ -120,7 +139,8 @@ struct RootView: View {
             }
         }
         .inspector(isPresented: $showChatPanel) {
-            MeetingChatView()
+            MeetingChatView(focusedMeetingID: chatFocusedMeetingID)
+                .id(chatFocusedMeetingID)
                 .inspectorColumnWidth(min: 320, ideal: 400, max: 500)
         }
         .sheet(isPresented: $showTriageSheet) {

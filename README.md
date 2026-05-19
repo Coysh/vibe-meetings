@@ -1,5 +1,7 @@
 # vibe-meetings
 
+> **Fair warning: this entire project is vibecoded.** I'm a PHP web developer. I have never written a line of Swift in my life. I don't know what half of these frameworks do. I asked Claude to build me a native macOS app and somehow it actually works. The architecture is real, the audio pipeline is real, the local LLM integration is real — but if you look at the git history you'll see it's just me going "make it do the thing" and an AI going "ok here's 400 lines of Core Audio code." If something looks over-engineered or weirdly elegant, that's not me. If something looks held together with vibes and hope, that's also not me — but it *is* the process. Anyway it records meetings and transcribes them locally and that's pretty cool for a PHP guy.
+
 A native macOS desktop app that records, transcribes, and summarises meetings
 **100% locally**. No data ever leaves your Mac.
 
@@ -126,7 +128,9 @@ thanks to FSEvents, and the `meeting.id` UUID survives moves.
 - All `URLSession` usage routes through `LocalhostOnlySession`, which rejects
   any host that isn't loopback or the user-configured Ollama host. The model
   downloader is the only deliberate other exception.
-- No telemetry. No analytics. No crash reporting SDK. No auto-update.
+- No telemetry. No analytics. No crash reporting SDK.
+- Auto-update via [Sparkle](https://sparkle-project.org) checks
+  `raw.githubusercontent.com` for new versions (appcast.xml). No data is sent.
 
 ## What to verify on a real Mac (the parts that need device-level testing)
 

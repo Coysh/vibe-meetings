@@ -28,12 +28,19 @@ final class MeetingChatService {
     private(set) var isStreaming = false
     private var streamTask: Task<Void, Never>?
 
+    /// When non-nil, only these meeting IDs are searched. When nil, all meetings are included.
+    var includedMeetingIDs: Set<UUID>?
+
+    /// Custom system prompt override for chat. When empty, uses the bundled prompt.
+    var customChatPrompt: String = ""
+
     func send(
         question: String,
         engine: any SummarizationEngine,
         modelId: String,
         store: FilesystemMeetingStore,
-        folderTree: FolderNode?
+        folderTree: FolderNode?,
+        liveRecording: (meeting: Meeting, segments: [TranscriptSegment])? = nil
     ) {
         let trimmed = question.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else { return }
@@ -47,7 +54,8 @@ final class MeetingChatService {
                 engine: engine,
                 modelId: modelId,
                 store: store,
-                folderTree: folderTree
+                folderTree: folderTree,
+                liveRecording: liveRecording
             )
             isStreaming = false
         }
@@ -67,10 +75,14 @@ final class MeetingChatService {
         engine: any SummarizationEngine,
         modelId: String,
         store: FilesystemMeetingStore,
-        folderTree: FolderNode?
+        folderTree: FolderNode?,
+        liveRecording: (meeting: Meeting, segments: [TranscriptSegment])? = nil
     ) async {
-        // 1. Collect all meetings from the folder tree.
-        let allMeetings = collectAllMeetings(from: folderTree)
+        // 1. Collect meetings from the folder tree, filtered by includedMeetingIDs if set.
+        var allMeetings = collectAllMeetings(from: folderTree)
+        if let filter = includedMeetingIDs {
+            allMeetings = allMeetings.filter { filter.contains($0.id) }
+        }
 
         // 2. Search for relevant meetings by keyword matching.
         let keywords = question.lowercased()
@@ -136,10 +148,32 @@ final class MeetingChatService {
             references.append(MeetingReference(id: meeting.id, title: meeting.title))
         }
 
+        // Include live recording context if available and relevant.
+        if let live = liveRecording, !live.segments.isEmpty {
+            let alreadyIncluded = references.contains(where: { $0.id == live.meeting.id })
+            if !alreadyIncluded {
+                var liveContext = "## \(live.meeting.title) (LIVE — currently recording)\n"
+                liveContext += "Date: \(live.meeting.startedAt.formatted(date: .abbreviated, time: .shortened))\n"
+                if let org = live.meeting.org { liveContext += "Org: \(org)\n" }
+                if let attendees = live.meeting.attendees, !attendees.isEmpty {
+                    liveContext += "Attendees: \(attendees.joined(separator: ", "))\n"
+                }
+                let transcript = live.segments
+                    .filter { !$0.isPartial }
+                    .map { $0.text }
+                    .joined(separator: " ")
+                let truncated = String(transcript.prefix(4000))
+                liveContext += "\nLive transcript:\n\(truncated)\n"
+                contextParts.insert(liveContext, at: 0)
+                references.insert(MeetingReference(id: live.meeting.id, title: "\(live.meeting.title) (live)"), at: 0)
+            }
+        }
+
         let fullContext = contextParts.joined(separator: "\n---\n\n")
 
-        // 4. Load chat system prompt.
-        let systemPrompt = loadChatPrompt()
+        // 4. Load chat system prompt (prefer custom override if set).
+        let trimmedCustom = customChatPrompt.trimmingCharacters(in: .whitespacesAndNewlines)
+        let systemPrompt = trimmedCustom.isEmpty ? loadChatPrompt() : trimmedCustom
 
         // 5. Build a pseudo-transcript to feed to the summarization engine.
         // We reuse the engine's `summarize()` by wrapping the question + context

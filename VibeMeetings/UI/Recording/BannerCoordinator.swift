@@ -47,6 +47,9 @@ final class BannerCoordinator {
 
     private var isRecordingProvider: () -> Bool = { false }
     private var activeEventProvider: () -> CalendarEvent? = { nil }
+    private var notifyMeetingDetectedProvider: () -> Bool = { true }
+    private var notifyPreMeetingReminderProvider: () -> Bool = { true }
+    private var reminderMinutesProvider: () -> Int = { 3 }
     private var micDismissed = false
     private var meetingEndDetector: MeetingEndDetector?
 
@@ -84,6 +87,18 @@ final class BannerCoordinator {
     /// Inject the meeting end detector for multi-signal end detection.
     func setMeetingEndDetector(_ detector: MeetingEndDetector) {
         self.meetingEndDetector = detector
+    }
+
+    /// Inject notification preference providers so the coordinator respects
+    /// user settings without a direct dependency on AppEnvironment.
+    func setNotificationProviders(
+        meetingDetected: @escaping () -> Bool,
+        preMeetingReminder: @escaping () -> Bool,
+        reminderMinutes: @escaping () -> Int
+    ) {
+        self.notifyMeetingDetectedProvider = meetingDetected
+        self.notifyPreMeetingReminderProvider = preMeetingReminder
+        self.reminderMinutesProvider = reminderMinutes
     }
 
     func start() {
@@ -236,18 +251,23 @@ final class BannerCoordinator {
             }
             micActiveSuggestion = true
         } else if !active {
-            // Mic went silent — clear the suggestion if not already acted on.
-            micActiveSuggestion = false
-            micEventTitle = nil
-            micActiveAppName = nil
+            // Mic went silent. If a meeting app is still running, keep the
+            // banner visible — the mic may toggle during a call (mute/unmute).
+            // Only clear if no meeting app is running.
+            if !isMeetingAppRunning() {
+                micActiveSuggestion = false
+                micEventTitle = nil
+                micActiveAppName = nil
+            }
         }
     }
 
     // MARK: - Meeting app polling
 
-    /// Periodically checks whether a meeting app is running during a calendar
-    /// event window. Only triggers if there's an event happening or about to
-    /// start — a meeting app just being open all day won't fire notifications.
+    /// Periodically checks whether a meeting app is running. Triggers when:
+    /// 1. A meeting app is running during a calendar event window, OR
+    /// 2. A meeting app is running AND the microphone is actively in use
+    ///    (catches impromptu calls with no calendar event).
     private func pollMeetingAppActivity() async {
         guard !isRecordingProvider(), !micDismissed else { return }
 
@@ -255,42 +275,52 @@ final class BannerCoordinator {
         if currentSuggestion != nil || micActiveSuggestion { return }
 
         // Check if a meeting app is running.
-        guard isMeetingAppRunning() else {
+        guard let appName = runningMeetingAppName() else {
             // Meeting app stopped — allow a fresh notification next time.
             notificationPosted = false
             return
         }
 
-        // Only suggest if there's a calendar event in progress or about to start.
-        // Without this gate, Teams running all day would spam notifications.
-        guard let ev = await calendar.currentOrNextEvent(),
-              ev.startDate <= Date().addingTimeInterval(5 * 60),
-              ev.endDate > Date() else {
+        // Check for a calendar event in progress or about to start.
+        let ev: CalendarEvent?
+        if let candidate = await calendar.currentOrNextEvent(),
+           candidate.startDate <= Date().addingTimeInterval(5 * 60),
+           candidate.endDate > Date() {
+            ev = candidate
+        } else {
+            ev = nil
+        }
+
+        // If no calendar event, check if the mic is actively in use.
+        // A meeting app running + mic active = strong signal of an actual call,
+        // even without a calendar event (handles impromptu/ad-hoc calls).
+        let micRunning = micMonitor.isMicCurrentlyRunning
+        guard ev != nil || micRunning else {
+            // Meeting app is open but no call evidence — don't spam.
             return
         }
 
-        // A meeting app is running during a calendar event — show the mic banner.
-        micActiveAppName = runningMeetingAppName()
-        micEventTitle = ev.title
+        // A meeting app is running with call evidence — show the mic banner.
+        micActiveAppName = appName
+        micEventTitle = ev?.title
         micActiveSuggestion = true
 
         // Also post a system notification so the user sees it even if the app window is hidden.
         if !notificationPosted {
             notificationPosted = true
-            await postMeetingDetectedNotification(eventTitle: ev.title, appName: micActiveAppName)
+            await postMeetingDetectedNotification(eventTitle: ev?.title, appName: appName)
         }
     }
 
     // MARK: - Pre-meeting reminders
 
-    /// How far in advance (seconds) to send the reminder notification.
-    private static let reminderLeadTime: TimeInterval = 3 * 60  // 3 minutes
-
     /// Schedule reminder notifications for upcoming calendar events. Skips
     /// events we've already scheduled, events that have already started, and
     /// events starting more than 1 hour out.
     private func scheduleUpcomingReminders() async {
-        guard CalendarPreferences.shared.bannerEnabled else { return }
+        guard notifyPreMeetingReminderProvider(),
+              CalendarPreferences.shared.bannerEnabled else { return }
+        let reminderLeadTime = TimeInterval(reminderMinutesProvider() * 60)
         let events = await calendar.upcomingEvents(within: 60 * 60)
         let now = Date()
         let center = UNUserNotificationCenter.current()
@@ -298,7 +328,7 @@ final class BannerCoordinator {
         for event in events {
             guard !scheduledReminderIDs.contains(event.id) else { continue }
 
-            let fireDate = event.startDate.addingTimeInterval(-Self.reminderLeadTime)
+            let fireDate = event.startDate.addingTimeInterval(-reminderLeadTime)
             // Only schedule if the fire date is in the future.
             guard fireDate > now else { continue }
 
@@ -381,6 +411,7 @@ final class BannerCoordinator {
 
     /// Post a macOS system notification alerting the user that a meeting was detected.
     private func postMeetingDetectedNotification(eventTitle: String?, appName: String? = nil) async {
+        guard notifyMeetingDetectedProvider() else { return }
         let center = UNUserNotificationCenter.current()
         let granted = (try? await center.requestAuthorization(options: [.alert, .sound])) ?? false
         guard granted else { return }

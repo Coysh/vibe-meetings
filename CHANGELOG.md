@@ -7,6 +7,22 @@ versioned with [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [1.5.0] - 2026-05-14
+
+### Added
+- Hot-swap microphone during active recording (Settings mic change applies immediately)
+- Chat AI can query live transcript mid-meeting (not just saved meetings)
+- CMD+F search in transcript view with match highlighting and count
+- Home button in toolbar to return to dashboard
+- "Organise Meetings" remembers previously triaged meetings (skip already-categorised)
+- Chat panel: model picker, meeting scope filter, custom system prompt, Markdown rendering
+- Impromptu call detection — notifications now fire when a meeting app + mic are active, even without a calendar event
+
+### Fixed
+- Meeting notifications not appearing for impromptu/ad-hoc calls (all detection paths previously required a calendar event)
+- Mic banner no longer disappears during mute/unmute if a meeting app is still running
+- Sparkle auto-update download URLs (pointed to 404 raw.githubusercontent.com instead of GitHub Release assets)
+
 ## [1.3.0] - 2026-05-13
 
 ### Added
@@ -84,7 +100,8 @@ versioned with [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - Microphone device selection in Settings
 - Resume recording for existing meetings
 
-[Unreleased]: https://github.com/Coysh/vibe-meetings/compare/v1.3.0...HEAD
+[Unreleased]: https://github.com/Coysh/vibe-meetings/compare/v1.5.0...HEAD
+[1.5.0]: https://github.com/Coysh/vibe-meetings/compare/v1.3.0...v1.5.0
 [1.3.0]: https://github.com/Coysh/vibe-meetings/compare/v1.2.0...v1.3.0
 [1.2.0]: https://github.com/Coysh/vibe-meetings/compare/v1.1.0...v1.2.0
 [1.1.0]: https://github.com/Coysh/vibe-meetings/compare/v1.0.0...v1.1.0

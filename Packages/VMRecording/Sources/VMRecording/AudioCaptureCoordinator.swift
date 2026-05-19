@@ -83,6 +83,12 @@ public actor AudioCaptureCoordinator: AudioCaptureService {
         stateContinuation.yield(.recording)
     }
 
+    /// Switch the microphone device mid-recording without interrupting streams.
+    public func switchMicDevice(to deviceID: AudioDeviceID?) throws {
+        guard isRunning else { return }
+        try mic.switchDevice(to: deviceID)
+    }
+
     public func pause() async {
         guard isRunning else { return }
         // We don't actually pause the engines; we simply drop their forwarded chunks.

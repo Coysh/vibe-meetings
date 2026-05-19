@@ -5,6 +5,7 @@ import VMSummarization
 
 struct MeetingDetailView: View {
     let meetingID: UUID
+    var onOpenChat: ((UUID) -> Void)? = nil
     @Environment(AppEnvironment.self) private var env
     @State private var handle: MeetingHandle?
     @State private var segments: [TranscriptSegment] = []
@@ -14,6 +15,7 @@ struct MeetingDetailView: View {
     @State private var editableMeeting: Meeting?
     @State private var showImportTranscript = false
     @State private var importTranscriptText = ""
+    @State private var isSearchingTranscript = false
 
     enum Tab: String, CaseIterable, Identifiable {
         case transcript, notes, summary, audio
@@ -58,7 +60,7 @@ struct MeetingDetailView: View {
                     switch selectedTab {
                     case .transcript:
                         VStack(spacing: 0) {
-                            TranscriptView(segments: displaySegments, participants: handle.meeting.participants, meeting: handle.meeting)
+                            TranscriptView(segments: displaySegments, participants: handle.meeting.participants, meeting: handle.meeting, isSearching: $isSearchingTranscript)
                             Divider()
                             HStack {
                                 Spacer()
@@ -109,6 +111,16 @@ struct MeetingDetailView: View {
                 }
             )
         }
+        .background {
+            // Hidden button to capture CMD+F and activate transcript search.
+            Button("") {
+                if selectedTab == .transcript {
+                    isSearchingTranscript = true
+                }
+            }
+            .keyboardShortcut("f", modifiers: .command)
+            .hidden()
+        }
         .sheet(isPresented: $showImportTranscript) {
             ImportTranscriptSheet(text: $importTranscriptText) {
                 Task {
@@ -155,6 +167,15 @@ struct MeetingDetailView: View {
                     metadataRow(meeting: meeting)
                 }
                 Spacer()
+
+                // Chat with this meeting
+                Button {
+                    onOpenChat?(meetingID)
+                } label: {
+                    Label("Chat", systemImage: "bubble.left.and.text.bubble.right")
+                }
+                .buttonStyle(.bordered)
+                .help("Ask questions about this meeting")
 
                 // Edit metadata button
                 Button {

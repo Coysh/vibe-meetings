@@ -1,5 +1,6 @@
 import ServiceManagement
 import SwiftUI
+import UserNotifications
 import VMCore
 import VMRecording
 import VMSummarization
@@ -12,6 +13,7 @@ struct SettingsView: View {
             GeneralSettingsView().tabItem { Label("General", systemImage: "gear") }
             EngineSettingsView().tabItem { Label("Engines", systemImage: "cpu") }
             CalendarSettingsView().tabItem { Label("Calendar", systemImage: "calendar") }
+            NotificationSettingsView().tabItem { Label("Notifications", systemImage: "bell") }
             PromptSettingsView().tabItem { Label("Prompts", systemImage: "text.quote") }
         }
         .frame(width: 560, height: 540)
@@ -188,6 +190,8 @@ private struct EngineSettingsView: View {
     @State private var openAIModels: [SummarizationModelInfo] = []
     @State private var openAITestResult: String? = nil
     @State private var openAITesting: Bool = false
+    @State private var ollamaModels: [SummarizationModelInfo] = []
+    @State private var ollamaModelsLoading: Bool = false
 
     enum OllamaTestResult: Equatable {
         case untested
@@ -242,10 +246,36 @@ private struct EngineSettingsView: View {
 
                 testResultRow
 
-                TextField("Default Ollama model", text: Binding(
-                    get: { env.selectedOllamaModelId },
-                    set: { env.selectedOllamaModelId = $0; UserDefaults.standard.set($0, forKey: "VibeMeetings.SelectedOllamaModelId") }
-                ))
+                if ollamaModelsLoading {
+                    HStack {
+                        Text("Default model")
+                        Spacer()
+                        ProgressView().controlSize(.small)
+                    }
+                } else if !ollamaModels.isEmpty {
+                    Picker("Default model", selection: Binding(
+                        get: { env.selectedOllamaModelId },
+                        set: {
+                            env.selectedOllamaModelId = $0
+                            UserDefaults.standard.set($0, forKey: "VibeMeetings.SelectedOllamaModelId")
+                        }
+                    )) {
+                        ForEach(ollamaModels) { m in
+                            Text(m.displayName).tag(m.id)
+                        }
+                    }
+                    .help("Used for both summaries and chat")
+                } else {
+                    TextField("Default model", text: Binding(
+                        get: { env.selectedOllamaModelId },
+                        set: {
+                            env.selectedOllamaModelId = $0
+                            UserDefaults.standard.set($0, forKey: "VibeMeetings.SelectedOllamaModelId")
+                        }
+                    ))
+                    .textFieldStyle(.roundedBorder)
+                    .help("Enter model name (e.g. llama3.1:8b-instruct-q4_K_M)")
+                }
             } header: {
                 Text("Ollama (summaries)")
             } footer: {
@@ -319,6 +349,7 @@ private struct EngineSettingsView: View {
             openAIKey = env.openAIApiKey
             openAIModel = env.selectedOpenAIModelId
             await loadModels()
+            await loadOllamaModels()
             if !openAIKey.isEmpty { await loadOpenAIModels() }
         }
     }
@@ -378,6 +409,13 @@ private struct EngineSettingsView: View {
 
     private func loadModels() async {
         models = (try? await env.activeTranscriptionEngine.availableModels()) ?? []
+    }
+
+    private func loadOllamaModels() async {
+        ollamaModelsLoading = true
+        defer { ollamaModelsLoading = false }
+        let engine = OllamaEngine(baseURL: env.ollamaBaseURL, promptBundle: .main)
+        ollamaModels = (try? await engine.availableModels()) ?? []
     }
 
     private func downloadModel(_ id: String) async {
@@ -458,6 +496,7 @@ private struct EngineSettingsView: View {
         guard let url = URL(string: ollamaURLString), url.host != nil else { return }
         env.setOllamaBaseURL(url)
         ollamaTestResult = .untested
+        Task { await loadOllamaModels() }
     }
 
     // MARK: - OpenAI
@@ -491,72 +530,263 @@ private struct EngineSettingsView: View {
     }
 }
 
+private struct NotificationSettingsView: View {
+    @Environment(AppEnvironment.self) private var env
+    @State private var authorizationStatus: UNAuthorizationStatus = .notDetermined
+
+    var body: some View {
+        @Bindable var env = env
+        Form {
+            Section {
+                if authorizationStatus == .denied {
+                    Label("Notifications are disabled in System Settings. Enable them to receive alerts from vibe-meetings.", systemImage: "exclamationmark.triangle.fill")
+                        .font(.caption)
+                        .foregroundStyle(.orange)
+
+                    Button("Open Notification Settings") {
+                        if let url = URL(string: "x-apple.systempreferences:com.apple.Notifications-Settings") {
+                            NSWorkspace.shared.open(url)
+                        }
+                    }
+                } else if authorizationStatus == .notDetermined {
+                    Button("Enable Notifications") {
+                        Task {
+                            let center = UNUserNotificationCenter.current()
+                            _ = try? await center.requestAuthorization(options: [.alert, .sound, .badge])
+                            await refreshAuthStatus()
+                        }
+                    }
+                    .buttonStyle(.borderedProminent)
+
+                    Text("Grant notification permission so vibe-meetings can alert you about meetings and completed summaries.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                } else {
+                    Label("Notifications are enabled", systemImage: "checkmark.circle.fill")
+                        .font(.caption)
+                        .foregroundStyle(.green)
+                }
+            } header: {
+                Text("Permission")
+            }
+
+            Section {
+                Toggle("Meeting / call detected", isOn: $env.notifyMeetingDetected)
+                Text("Alert when a meeting app and microphone are active together, or a calendar event is starting.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+
+                Toggle("Pre-meeting reminder", isOn: $env.notifyPreMeetingReminder)
+
+                if env.notifyPreMeetingReminder {
+                    Picker("Remind me", selection: $env.notifyReminderMinutes) {
+                        Text("1 minute before").tag(1)
+                        Text("3 minutes before").tag(3)
+                        Text("5 minutes before").tag(5)
+                        Text("10 minutes before").tag(10)
+                    }
+                }
+
+                Text("Sends a reminder before calendar events with an option to start recording.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+
+                Toggle("Summary ready", isOn: $env.notifySummaryReady)
+                Text("Alert when an AI summary finishes generating.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            } header: {
+                Text("Notification Types")
+            }
+
+            Section {
+                Button("Send Test Notification") {
+                    Task { await sendTestNotification() }
+                }
+                .disabled(authorizationStatus != .authorized)
+
+                Text("Sends a sample notification so you can verify your system notification settings are working.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            } header: {
+                Text("Test")
+            }
+        }
+        .padding()
+        .task { await refreshAuthStatus() }
+    }
+
+    private func refreshAuthStatus() async {
+        let settings = await UNUserNotificationCenter.current().notificationSettings()
+        authorizationStatus = settings.authorizationStatus
+    }
+
+    private func sendTestNotification() async {
+        let center = UNUserNotificationCenter.current()
+        let granted = (try? await center.requestAuthorization(options: [.alert, .sound])) ?? false
+        guard granted else {
+            await refreshAuthStatus()
+            return
+        }
+
+        let content = UNMutableNotificationContent()
+        content.title = "vibe-meetings"
+        content.body = "Notifications are working! You'll see alerts for meetings and summaries."
+        content.sound = .default
+
+        let request = UNNotificationRequest(
+            identifier: "test-notification-\(UUID().uuidString)",
+            content: content,
+            trigger: nil
+        )
+        try? await center.add(request)
+    }
+}
+
 private struct PromptSettingsView: View {
     @Environment(AppEnvironment.self) private var env
     @State private var promptText: String = ""
+    @State private var chatPromptText: String = ""
     @State private var showingDefault = false
+    @State private var selectedTab = 0
 
     private static let defaultPrompt = PromptLoader.fallbackPrompt
 
+    private static let defaultChatPrompt: String = {
+        if let url = Bundle.main.url(forResource: "chat.system", withExtension: "md", subdirectory: "Prompts"),
+           let content = try? String(contentsOf: url, encoding: .utf8) {
+            return content
+        }
+        return "You are a meeting assistant. Answer the user's question based ONLY on the meeting context provided. Reference which meeting(s) your answer comes from by name. Use Markdown formatting."
+    }()
+
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
-            Text("Custom System Prompt")
-                .font(.headline)
-            Text("Override the default instructions sent to the LLM when generating summaries. Leave blank to use the built-in prompt.")
-                .font(.caption)
-                .foregroundStyle(.secondary)
-
-            TextEditor(text: $promptText)
-                .font(.system(.body, design: .monospaced))
-                .scrollContentBackground(.hidden)
-                .padding(8)
-                .background(Color(nsColor: .textBackgroundColor))
-                .clipShape(RoundedRectangle(cornerRadius: 6))
-                .frame(minHeight: 240)
-
-            HStack {
-                Button("Reset to Default") {
-                    promptText = ""
-                    save()
-                }
-                .disabled(promptText.isEmpty)
-
-                Button(showingDefault ? "Hide Default" : "Show Default") {
-                    showingDefault.toggle()
-                }
-
-                Spacer()
-
-                Button("Save") { save() }
-                    .buttonStyle(.borderedProminent)
-                    .disabled(promptText == env.customSystemPrompt)
+            Picker("", selection: $selectedTab) {
+                Text("Summary Prompt").tag(0)
+                Text("Chat Prompt").tag(1)
             }
+            .pickerStyle(.segmented)
 
-            if showingDefault {
-                GroupBox("Built-in prompt") {
-                    ScrollView {
-                        Text(Self.defaultPrompt)
-                            .font(.system(.caption, design: .monospaced))
-                            .textSelection(.enabled)
-                            .frame(maxWidth: .infinity, alignment: .leading)
-                    }
-                    .frame(maxHeight: 160)
-                }
+            if selectedTab == 0 {
+                summaryPromptEditor
+            } else {
+                chatPromptEditor
             }
         }
         .padding()
         .onAppear {
             promptText = env.customSystemPrompt
+            chatPromptText = UserDefaults.standard.string(forKey: "VibeMeetings.ChatCustomPrompt") ?? ""
         }
     }
 
-    private func save() {
+    @ViewBuilder
+    private var summaryPromptEditor: some View {
+        Text("Override the default instructions sent to the LLM when generating summaries. Leave blank to use the built-in prompt.")
+            .font(.caption)
+            .foregroundStyle(.secondary)
+
+        TextEditor(text: $promptText)
+            .font(.system(.body, design: .monospaced))
+            .scrollContentBackground(.hidden)
+            .padding(8)
+            .background(Color(nsColor: .textBackgroundColor))
+            .clipShape(RoundedRectangle(cornerRadius: 6))
+            .frame(minHeight: 200)
+
+        HStack {
+            Button("Reset to Default") {
+                promptText = ""
+                saveSummaryPrompt()
+            }
+            .disabled(promptText.isEmpty)
+
+            Button(showingDefault ? "Hide Default" : "Show Default") {
+                showingDefault.toggle()
+            }
+
+            Spacer()
+
+            Button("Save") { saveSummaryPrompt() }
+                .buttonStyle(.borderedProminent)
+                .disabled(promptText == env.customSystemPrompt)
+        }
+
+        if showingDefault {
+            GroupBox("Built-in summary prompt") {
+                ScrollView {
+                    Text(Self.defaultPrompt)
+                        .font(.system(.caption, design: .monospaced))
+                        .textSelection(.enabled)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                }
+                .frame(maxHeight: 120)
+            }
+        }
+    }
+
+    @ViewBuilder
+    private var chatPromptEditor: some View {
+        Text("Override the system prompt used in the Chat to Meetings panel. Leave blank to use the built-in prompt.")
+            .font(.caption)
+            .foregroundStyle(.secondary)
+
+        TextEditor(text: $chatPromptText)
+            .font(.system(.body, design: .monospaced))
+            .scrollContentBackground(.hidden)
+            .padding(8)
+            .background(Color(nsColor: .textBackgroundColor))
+            .clipShape(RoundedRectangle(cornerRadius: 6))
+            .frame(minHeight: 200)
+
+        HStack {
+            Button("Reset to Default") {
+                chatPromptText = ""
+                saveChatPrompt()
+            }
+            .disabled(chatPromptText.isEmpty)
+
+            Button(showingDefault ? "Hide Default" : "Show Default") {
+                showingDefault.toggle()
+            }
+
+            Spacer()
+
+            Button("Save") { saveChatPrompt() }
+                .buttonStyle(.borderedProminent)
+                .disabled(chatPromptText == (UserDefaults.standard.string(forKey: "VibeMeetings.ChatCustomPrompt") ?? ""))
+        }
+
+        if showingDefault {
+            GroupBox("Built-in chat prompt") {
+                ScrollView {
+                    Text(Self.defaultChatPrompt)
+                        .font(.system(.caption, design: .monospaced))
+                        .textSelection(.enabled)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                }
+                .frame(maxHeight: 120)
+            }
+        }
+    }
+
+    private func saveSummaryPrompt() {
         env.customSystemPrompt = promptText
         let trimmed = promptText.trimmingCharacters(in: .whitespacesAndNewlines)
         if trimmed.isEmpty {
             UserDefaults.standard.removeObject(forKey: "VibeMeetings.CustomSystemPrompt")
         } else {
             UserDefaults.standard.set(promptText, forKey: "VibeMeetings.CustomSystemPrompt")
+        }
+    }
+
+    private func saveChatPrompt() {
+        let trimmed = chatPromptText.trimmingCharacters(in: .whitespacesAndNewlines)
+        if trimmed.isEmpty {
+            UserDefaults.standard.removeObject(forKey: "VibeMeetings.ChatCustomPrompt")
+        } else {
+            UserDefaults.standard.set(chatPromptText, forKey: "VibeMeetings.ChatCustomPrompt")
         }
     }
 }

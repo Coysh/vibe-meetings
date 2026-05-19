@@ -45,6 +45,16 @@ struct VibeMeetingsApp: App {
                 }
                 .keyboardShortcut("n")
             }
+            CommandGroup(replacing: .appInfo) {
+                Button("About vibe-meetings") {
+                    showAboutWindow()
+                }
+                Divider()
+                Button("Check for Updates…") {
+                    appEnv?.sparkleUpdater.checkForUpdates()
+                }
+                .disabled(appEnv?.sparkleUpdater.canCheckForUpdates != true)
+            }
         }
 
         Settings {
@@ -106,4 +116,22 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
 
 extension Notification.Name {
     static let newMeetingRequested = Notification.Name("VibeMeetings.NewMeetingRequested")
+}
+
+/// Opens a standalone About window (replacing the default macOS About panel).
+@MainActor
+private func showAboutWindow() {
+    let windowID = "about-vibe-meetings"
+    // Re-focus if already open.
+    if let existing = NSApp.windows.first(where: { $0.identifier?.rawValue == windowID }) {
+        existing.makeKeyAndOrderFront(nil)
+        return
+    }
+    let hosting = NSHostingController(rootView: AboutView())
+    let window = NSWindow(contentViewController: hosting)
+    window.identifier = NSUserInterfaceItemIdentifier(windowID)
+    window.title = "About vibe-meetings"
+    window.styleMask = [.titled, .closable]
+    window.center()
+    window.makeKeyAndOrderFront(nil)
 }

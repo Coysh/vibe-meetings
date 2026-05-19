@@ -94,6 +94,68 @@ public final class MicrophoneCapturer: @unchecked Sendable {
         print("[MicCapturer] engine started")
     }
 
+    /// Switch the capture device mid-recording without tearing down the
+    /// async streams. Removes the existing tap, reconfigures the input node,
+    /// re-installs the tap, and restarts the engine.
+    public func switchDevice(to deviceID: AudioDeviceID?) throws {
+        guard engine.isRunning else { return }
+
+        // 1. Tear down current capture.
+        engine.inputNode.removeTap(onBus: 0)
+        engine.stop()
+
+        let input = engine.inputNode
+
+        // 2. Reconfigure the device.
+        if let deviceID {
+            var devID = deviceID
+            let audioUnit = input.audioUnit!
+            let status = AudioUnitSetProperty(
+                audioUnit,
+                kAudioOutputUnitProperty_CurrentDevice,
+                kAudioUnitScope_Global,
+                0,
+                &devID,
+                UInt32(MemoryLayout<AudioDeviceID>.size)
+            )
+            if status == noErr {
+                print("[MicCapturer] switched to device id=\(deviceID)")
+            } else {
+                print("[MicCapturer] failed to switch to device \(deviceID): OSStatus \(status)")
+            }
+        } else {
+            print("[MicCapturer] switched to system default input device")
+        }
+
+        // 3. Re-install tap with the new device's format.
+        let format = input.inputFormat(forBus: 0)
+        guard format.sampleRate > 0 else {
+            throw AudioCaptureError.audioEngineFailed("New input device reports zero sample rate")
+        }
+
+        var tapCount = 0
+        input.installTap(onBus: 0, bufferSize: 4096, format: format) { [weak self] buffer, when in
+            guard let self else { return }
+            tapCount += 1
+            let copy = buffer.copy() as! AVAudioPCMBuffer
+            self.bufferContinuation.yield(SendableAudioBuffer(copy))
+            do {
+                let samples = try self.converter.convert(buffer)
+                if !samples.isEmpty {
+                    let ts = Self.hostTime(when.hostTime) - self.startEpoch
+                    self.pcmContinuation.yield(PCMChunk(samples: samples, timestamp: ts))
+                }
+            } catch {
+                if tapCount <= 3 {
+                    print("[MicCapturer] conversion error after switch at tap #\(tapCount): \(error)")
+                }
+            }
+        }
+
+        try engine.start()
+        print("[MicCapturer] engine restarted after device switch")
+    }
+
     public func stop() {
         if engine.isRunning {
             engine.inputNode.removeTap(onBus: 0)

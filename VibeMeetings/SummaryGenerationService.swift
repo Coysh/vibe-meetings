@@ -48,6 +48,10 @@ final class SummaryGenerationService {
     private var jobs: [UUID: SummaryJob] = [:]
     private var tasks: [UUID: Task<Void, Never>] = [:]
 
+    /// When set to `false`, suppresses the "Summary Ready" system notification.
+    /// Defaults to `true`; bound to `AppEnvironment.notifySummaryReady`.
+    var notificationsEnabled: Bool = true
+
     /// Returns the in-flight or most-recently-completed job for a meeting, if any.
     func job(for meetingID: UUID) -> SummaryJob? {
         jobs[meetingID]
@@ -101,8 +105,8 @@ final class SummaryGenerationService {
                 try? await store.writeSummary(job.partialSummary, for: meetingID)
                 job.complete()
 
-                // Post a local notification unless silent (auto-generated).
-                if !silent {
+                // Post a local notification unless silent (auto-generated) or disabled in settings.
+                if !silent, self?.notificationsEnabled == true {
                     await self?.postCompletionNotification(title: meetingTitle)
                 }
             } catch {

@@ -30,6 +30,8 @@ final class RecordingController {
     private var streamTasks: [Task<Void, Never>] = []
     private var clockTask: Task<Void, Never>?
     private var pumpTask: Task<Void, Never>?
+    /// Tracks the last mic UID we configured so we can detect settings changes.
+    private var currentMicUID: String?
 
     init(env: AppEnvironment) {
         self.env = env
@@ -86,6 +88,7 @@ final class RecordingController {
 
         // 2. Start audio capture.
         let micID = env.selectedMicDeviceID
+        currentMicUID = env.selectedMicDeviceUID
         print("[RecordingController] selectedMicDeviceUID=\(env.selectedMicDeviceUID ?? "nil"), resolved deviceID=\(String(describing: micID))")
         do {
             try await coordinator.start(writingAudioTo: audioURL, micDeviceID: micID)
@@ -145,6 +148,18 @@ final class RecordingController {
         }
     }
 
+    /// Switch the microphone mid-recording when the user changes it in Settings.
+    func switchMicIfNeeded() {
+        let newUID = env.selectedMicDeviceUID
+        guard newUID != currentMicUID, state == .recording else { return }
+        currentMicUID = newUID
+        let newDeviceID = env.selectedMicDeviceID
+        print("[RecordingController] Switching mic mid-recording: UID=\(newUID ?? "default"), deviceID=\(String(describing: newDeviceID))")
+        Task {
+            try? await coordinator.switchMicDevice(to: newDeviceID)
+        }
+    }
+
     private func ingest(_ seg: TranscriptSegment) {
         merger.ingest(seg)
         liveSegments = merger.snapshot()
@@ -187,8 +202,22 @@ final class RecordingController {
             let inputURL = folder.audioURL
             let outputURL = folder.cleanedAudioURL
             Task.detached(priority: .utility) {
+                let fm = FileManager.default
+                guard fm.fileExists(atPath: inputURL.path) else {
+                    print("[RecordingController] Echo reduction skipped — audio file not found at \(inputURL.path)")
+                    return
+                }
+                let attrs = try? fm.attributesOfItem(atPath: inputURL.path)
+                let size = (attrs?[.size] as? Int) ?? 0
+                print("[RecordingController] Starting echo reduction: input=\(inputURL.lastPathComponent) (\(size) bytes)")
                 let ok = await AudioEchoReducer.reduceEcho(inputURL: inputURL, outputURL: outputURL)
-                print("[RecordingController] Echo reduction \(ok ? "succeeded" : "skipped/failed")")
+                if ok {
+                    let outAttrs = try? fm.attributesOfItem(atPath: outputURL.path)
+                    let outSize = (outAttrs?[.size] as? Int) ?? 0
+                    print("[RecordingController] Echo reduction succeeded: output=\(outputURL.lastPathComponent) (\(outSize) bytes)")
+                } else {
+                    print("[RecordingController] Echo reduction failed for \(inputURL.lastPathComponent)")
+                }
             }
         }
 
@@ -203,6 +232,7 @@ final class RecordingController {
 
 struct RecordingBarView: View {
     @Bindable var controller: RecordingController
+    @Environment(AppEnvironment.self) private var env
     var onStopped: (() -> Void)?
     var onNavigateToMeeting: (() -> Void)?
     @State private var showNotes = false
@@ -274,6 +304,9 @@ struct RecordingBarView: View {
             }
         }
         .background(.ultraThinMaterial)
+        .onChange(of: env.selectedMicDeviceUID) {
+            controller.switchMicIfNeeded()
+        }
     }
 }
 

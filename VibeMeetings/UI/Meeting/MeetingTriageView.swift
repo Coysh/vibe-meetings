@@ -14,6 +14,12 @@ struct MeetingTriageView: View {
     @State private var currentIndex = 0
     @State private var isLoading = true
 
+    /// Persisted set of meeting IDs that have already been triaged (via Save or Skip).
+    private static let triagedKey = "VibeMeetings.TriagedMeetingIDs"
+    @State private var triagedIDs: Set<String> = {
+        Set(UserDefaults.standard.stringArray(forKey: triagedKey) ?? [])
+    }()
+
     // Per-meeting editing state
     @State private var selectedType: MeetingType = .group
     @State private var orgText: String = ""
@@ -83,6 +89,15 @@ struct MeetingTriageView: View {
                 .font(.title3)
             Text("Every meeting has a type and folder assigned.")
                 .foregroundStyle(.secondary)
+            Button("Re-check all meetings") {
+                triagedIDs.removeAll()
+                UserDefaults.standard.removeObject(forKey: Self.triagedKey)
+                currentIndex = 0
+                Task { await loadData() }
+            }
+            .buttonStyle(.bordered)
+            .controlSize(.small)
+            .foregroundStyle(.secondary)
             Spacer()
         }
         .frame(maxWidth: .infinity)
@@ -266,6 +281,9 @@ struct MeetingTriageView: View {
         into result: inout [(Meeting, URL)]
     ) {
         if node.isMeeting, let m = node.meeting {
+            // Skip meetings already triaged in a previous session.
+            guard !triagedIDs.contains(m.id.uuidString) else { return }
+
             let needsTriage = m.meetingType == nil
                 || (m.labels == nil || m.labels?.isEmpty == true)
                 || node.url.deletingLastPathComponent().standardizedFileURL == rootURL.standardizedFileURL
@@ -364,7 +382,16 @@ struct MeetingTriageView: View {
 
     // MARK: - Actions
 
+    private func markTriaged(_ meetingID: UUID) {
+        triagedIDs.insert(meetingID.uuidString)
+        UserDefaults.standard.set(Array(triagedIDs), forKey: Self.triagedKey)
+    }
+
     private func advanceToNext() {
+        // Mark the current meeting as triaged before advancing.
+        if currentIndex < untaggedMeetings.count {
+            markTriaged(untaggedMeetings[currentIndex].meeting.id)
+        }
         currentIndex += 1
         if currentIndex < untaggedMeetings.count {
             let next = untaggedMeetings[currentIndex]

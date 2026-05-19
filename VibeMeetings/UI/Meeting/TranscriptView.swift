@@ -5,17 +5,74 @@ struct TranscriptView: View {
     let segments: [TranscriptSegment]
     let participants: [Speaker]
     var meeting: Meeting?
+    @Binding var isSearching: Bool
     @State private var copied = false
+    @State private var searchText = ""
+    @FocusState private var searchFocused: Bool
 
     private var nameByID: [String: String] {
         Dictionary(uniqueKeysWithValues: participants.map { ($0.id, $0.displayName) })
     }
+
+    /// Segment IDs that contain the current search query.
+    private var matchingIDs: Set<UUID> {
+        guard !searchText.trimmingCharacters(in: .whitespaces).isEmpty else { return [] }
+        let query = searchText.lowercased()
+        var ids = Set<UUID>()
+        for seg in segments {
+            if seg.text.lowercased().contains(query) {
+                ids.insert(seg.id)
+            }
+            let name = nameByID[seg.speakerId] ?? seg.speakerId
+            if name.lowercased().contains(query) {
+                ids.insert(seg.id)
+            }
+        }
+        return ids
+    }
+
+    private var matchCount: Int { matchingIDs.count }
 
     var body: some View {
         VStack(spacing: 0) {
             // Toolbar with copy button
             if !segments.isEmpty {
                 HStack {
+                    if isSearching {
+                        HStack(spacing: 6) {
+                            Image(systemName: "magnifyingglass")
+                                .foregroundStyle(.secondary)
+                                .font(.caption)
+                            TextField("Search transcript…", text: $searchText)
+                                .textFieldStyle(.plain)
+                                .font(.callout)
+                                .focused($searchFocused)
+                            if !searchText.isEmpty {
+                                Text("\(matchCount) match\(matchCount == 1 ? "" : "es")")
+                                    .font(.caption2)
+                                    .foregroundStyle(.secondary)
+                                Button {
+                                    searchText = ""
+                                } label: {
+                                    Image(systemName: "xmark.circle.fill")
+                                        .font(.caption)
+                                        .foregroundStyle(.secondary)
+                                }
+                                .buttonStyle(.borderless)
+                            }
+                            Button {
+                                isSearching = false
+                                searchText = ""
+                            } label: {
+                                Text("Done")
+                                    .font(.caption)
+                            }
+                            .buttonStyle(.borderless)
+                        }
+                        .padding(.horizontal, 12)
+                        .padding(.vertical, 6)
+                        .background(.bar)
+                    }
                     Spacer()
                     Button {
                         let text = formattedTranscript()
@@ -51,7 +108,9 @@ struct TranscriptView: View {
                         ForEach(segments) { seg in
                             TranscriptSegmentRow(
                                 segment: seg,
-                                speakerName: nameByID[seg.speakerId] ?? seg.speakerId.capitalized
+                                speakerName: nameByID[seg.speakerId] ?? seg.speakerId.capitalized,
+                                searchQuery: isSearching ? searchText : "",
+                                isMatch: matchingIDs.contains(seg.id)
                             )
                             .id(seg.id)
                         }
@@ -59,8 +118,21 @@ struct TranscriptView: View {
                     .padding()
                 }
                 .onChange(of: segments.last?.id) { _, newID in
-                    if let newID { withAnimation { proxy.scrollTo(newID, anchor: .bottom) } }
+                    if let newID, !isSearching { withAnimation { proxy.scrollTo(newID, anchor: .bottom) } }
                 }
+                .onChange(of: searchText) {
+                    // Scroll to the first match when typing.
+                    if let firstMatch = segments.first(where: { matchingIDs.contains($0.id) }) {
+                        withAnimation { proxy.scrollTo(firstMatch.id, anchor: .center) }
+                    }
+                }
+            }
+        }
+        .onChange(of: isSearching) {
+            if isSearching {
+                searchFocused = true
+            } else {
+                searchText = ""
             }
         }
     }
@@ -147,6 +219,8 @@ struct TranscriptView: View {
 struct TranscriptSegmentRow: View {
     let segment: TranscriptSegment
     let speakerName: String
+    var searchQuery: String = ""
+    var isMatch: Bool = false
 
     var body: some View {
         VStack(alignment: .leading, spacing: 4) {
@@ -163,10 +237,39 @@ struct TranscriptSegmentRow: View {
                         .foregroundStyle(.tertiary)
                 }
             }
-            Text(segment.text)
+            highlightedText(segment.text)
                 .textSelection(.enabled)
         }
         .opacity(segment.isPartial ? 0.7 : 1)
+        .padding(.vertical, isMatch ? 2 : 0)
+        .padding(.horizontal, isMatch ? 4 : 0)
+        .background(isMatch ? Color.yellow.opacity(0.12) : Color.clear, in: RoundedRectangle(cornerRadius: 4))
+    }
+
+    @ViewBuilder
+    private func highlightedText(_ text: String) -> some View {
+        let query = searchQuery.trimmingCharacters(in: .whitespaces).lowercased()
+        if query.isEmpty || !isMatch {
+            Text(text)
+        } else {
+            Text(buildHighlightedAttributedString(text: text, query: query))
+        }
+    }
+
+    private func buildHighlightedAttributedString(text: String, query: String) -> AttributedString {
+        var attributed = AttributedString(text)
+        let lower = text.lowercased()
+        var searchStart = lower.startIndex
+        while let range = lower.range(of: query, range: searchStart..<lower.endIndex) {
+            let attrStart = AttributedString.Index(range.lowerBound, within: attributed)
+            let attrEnd = AttributedString.Index(range.upperBound, within: attributed)
+            if let attrStart, let attrEnd {
+                attributed[attrStart..<attrEnd].backgroundColor = .yellow.opacity(0.4)
+                attributed[attrStart..<attrEnd].foregroundColor = .black
+            }
+            searchStart = range.upperBound
+        }
+        return attributed
     }
 
     private var speakerColor: Color {

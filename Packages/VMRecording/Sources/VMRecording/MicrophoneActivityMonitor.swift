@@ -76,6 +76,13 @@ public final class MicrophoneActivityMonitor: @unchecked Sendable {
         continuation.finish()
     }
 
+    /// Returns the current running state of the monitored input device.
+    /// Useful for polling-based checks alongside the event-driven stream.
+    public var isMicCurrentlyRunning: Bool {
+        guard listenerInstalled else { return false }
+        return isDeviceRunning(deviceID)
+    }
+
     // MARK: - Internal
 
     fileprivate func handleChange() {

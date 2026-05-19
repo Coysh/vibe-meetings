@@ -84,6 +84,36 @@ final class AppEnvironment {
     private static let customPromptKey = "VibeMeetings.CustomSystemPrompt"
     private static let configuredOrgsKey = "VibeMeetings.ConfiguredOrgs"
 
+    // MARK: - Notification preferences
+
+    private static let notifyMeetingDetectedKey = "VibeMeetings.Notify.MeetingDetected"
+    private static let notifyPreMeetingReminderKey = "VibeMeetings.Notify.PreMeetingReminder"
+    private static let notifySummaryReadyKey = "VibeMeetings.Notify.SummaryReady"
+    private static let notifyReminderMinutesKey = "VibeMeetings.Notify.ReminderMinutes"
+
+    /// Whether to post a system notification when a meeting/call is detected.
+    var notifyMeetingDetected: Bool {
+        didSet { UserDefaults.standard.set(notifyMeetingDetected, forKey: Self.notifyMeetingDetectedKey) }
+    }
+
+    /// Whether to post pre-meeting reminder notifications before calendar events.
+    var notifyPreMeetingReminder: Bool {
+        didSet { UserDefaults.standard.set(notifyPreMeetingReminder, forKey: Self.notifyPreMeetingReminderKey) }
+    }
+
+    /// Whether to post a notification when summary generation completes.
+    var notifySummaryReady: Bool {
+        didSet {
+            UserDefaults.standard.set(notifySummaryReady, forKey: Self.notifySummaryReadyKey)
+            summaryService.notificationsEnabled = notifySummaryReady
+        }
+    }
+
+    /// How many minutes before a meeting to send the reminder (default 3).
+    var notifyReminderMinutes: Int {
+        didSet { UserDefaults.standard.set(notifyReminderMinutes, forKey: Self.notifyReminderMinutesKey) }
+    }
+
     init() throws {
         let defaults = UserDefaults.standard
         let rootKey = "VibeMeetings.RootURL.bookmark"
@@ -136,6 +166,12 @@ final class AppEnvironment {
         self.customSystemPrompt = defaults.string(forKey: Self.customPromptKey) ?? ""
         self.configuredOrgs = defaults.stringArray(forKey: Self.configuredOrgsKey) ?? ["Evangelical Alliance", "Coysh Digital"]
 
+        // Notification preferences (default: all enabled, 3-minute lead).
+        self.notifyMeetingDetected = defaults.object(forKey: Self.notifyMeetingDetectedKey) as? Bool ?? true
+        self.notifyPreMeetingReminder = defaults.object(forKey: Self.notifyPreMeetingReminderKey) as? Bool ?? true
+        self.notifySummaryReady = defaults.object(forKey: Self.notifySummaryReadyKey) as? Bool ?? true
+        self.notifyReminderMinutes = defaults.object(forKey: Self.notifyReminderMinutesKey) as? Int ?? 3
+
         if storedSummKind == OpenAIEngine.kind && !storedOpenAIKey.isEmpty {
             self.summarizationEngine = OpenAIEngine(apiKey: storedOpenAIKey, promptBundle: .main)
             self.activeSummarizationKind = OpenAIEngine.kind
@@ -147,6 +183,9 @@ final class AppEnvironment {
         let cal = EventKitCalendarService()
         self.calendarService = cal
         self.bannerCoordinator = BannerCoordinator(calendar: cal)
+
+        // Sync summary notification preference to the service (after all stored properties init).
+        self.summaryService.notificationsEnabled = self.notifySummaryReady
     }
 
     /// Fetch the latest tree from the store and update `folderTree` on the
