@@ -5,6 +5,14 @@
         <language>en</language>
         <!-- Items are managed by release.sh -->
         <item>
+            <title>1.4.3</title>
+            <pubDate>Mon, 19 May 2026 22:27:00 +0100</pubDate>
+            <sparkle:version>202605192222</sparkle:version>
+            <sparkle:shortVersionString>1.4.3</sparkle:shortVersionString>
+            <sparkle:minimumSystemVersion>15.0</sparkle:minimumSystemVersion>
+            <enclosure url="https://github.com/Coysh/vibe-meetings/releases/download/v1.4.3/VibeMeetings.zip" length="7688591" type="application/octet-stream" sparkle:edSignature="JNo9yiwXePpVKztV7h0biGKQoHPsIc3d0PK2MB96qB9MrJeFepGkQTeQH93IkYKlDM39kx0qXFcW67aJOhT7AQ=="/>
+        </item>
+        <item>
             <title>1.4.2</title>
             <pubDate>Wed, 13 May 2026 23:16:10 +0100</pubDate>
             <sparkle:version>202605132315</sparkle:version>

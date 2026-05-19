@@ -150,7 +150,7 @@ ZIP_SIZE=$(du -h "$BUILD_DIR/VibeMeetings.zip" | cut -f1)
 echo "==> Created $BUILD_DIR/VibeMeetings.zip ($ZIP_SIZE)"
 
 # ── Sparkle: sign the update and regenerate appcast ──────
-SPARKLE_BIN="$HOME/Library/Developer/Xcode/DerivedData/Sparkle-*/SourcePackages/artifacts/sparkle/Sparkle.framework/../bin"
+SPARKLE_BIN="$HOME/Library/Developer/Xcode/DerivedData/*/SourcePackages/artifacts/sparkle/Sparkle/bin"
 SPARKLE_SIGN=$(ls $SPARKLE_BIN/sign_update 2>/dev/null | head -1 || true)
 SPARKLE_APPCAST=$(ls $SPARKLE_BIN/generate_appcast 2>/dev/null | head -1 || true)
 
@@ -185,42 +185,35 @@ BUILD_NUMBER=$(/usr/libexec/PlistBuddy -c "Print :CFBundleVersion" VibeMeetings/
 DOWNLOAD_URL="https://github.com/$REPO/releases/download/$TAG/VibeMeetings.zip"
 PUB_DATE=$(date -R)
 
-# Build the new <item> entry
-NEW_ITEM="        <item>
+# Build the new <item> entry in a temp file (avoids awk newline issues)
+ITEM_FILE=$(mktemp)
+ENCLOSURE_ATTR="url=\"$DOWNLOAD_URL\" length=\"$ZIP_BYTES\" type=\"application/octet-stream\""
+if [ -n "$ED_SIGNATURE" ]; then
+    ENCLOSURE_ATTR="$ENCLOSURE_ATTR sparkle:edSignature=\"$ED_SIGNATURE\""
+fi
+cat > "$ITEM_FILE" <<ITEM_EOF
+        <item>
             <title>$VERSION</title>
             <pubDate>$PUB_DATE</pubDate>
             <sparkle:version>$BUILD_NUMBER</sparkle:version>
             <sparkle:shortVersionString>$VERSION</sparkle:shortVersionString>
             <sparkle:minimumSystemVersion>15.0</sparkle:minimumSystemVersion>
-            <enclosure url=\"$DOWNLOAD_URL\" length=\"$ZIP_BYTES\" type=\"application/octet-stream\""
+            <enclosure $ENCLOSURE_ATTR/>
+        </item>
+ITEM_EOF
 
-if [ -n "$ED_SIGNATURE" ]; then
-    NEW_ITEM="$NEW_ITEM sparkle:edSignature=\"$ED_SIGNATURE\""
-fi
-NEW_ITEM="$NEW_ITEM/>
-        </item>"
-
-# If appcast.xml exists, insert new item at the top of the channel (after the language tag)
 if [ -f appcast.xml ]; then
-    # Remove any existing entry for this version, then insert the new one
+    # Remove any existing entry for this version
     TEMP_APPCAST=$(mktemp)
-    awk -v new_item="$NEW_ITEM" -v version="$VERSION" '
-    BEGIN { inserted=0; skip=0 }
-    # Skip existing entries for this same version
+    awk -v version="$VERSION" '
+    BEGIN { skip=0 }
     /<item>/ {
-        # Read ahead to check if this item matches our version
         line = $0
         if (getline nextline > 0) {
             if (nextline ~ "<title>" version "</title>") {
                 skip = 1
                 next
             } else {
-                # Not our version — print both lines
-                if (!inserted && line ~ /<item>/) {
-                    # Insert before the first <item>
-                    print new_item
-                    inserted = 1
-                }
                 print line
                 print nextline
                 next
@@ -229,13 +222,25 @@ if [ -f appcast.xml ]; then
     }
     skip && /<\/item>/ { skip=0; next }
     skip { next }
-    # Insert before the first <item> if we havent yet
-    !inserted && /<item>/ {
-        print new_item
-        inserted = 1
-    }
     { print }
     ' appcast.xml > "$TEMP_APPCAST"
+    mv "$TEMP_APPCAST" appcast.xml
+
+    # Insert new item after the comment line, or after <language> if no comment
+    TEMP_APPCAST=$(mktemp)
+    INSERTED=false
+    while IFS= read -r line; do
+        echo "$line" >> "$TEMP_APPCAST"
+        if [ "$INSERTED" = false ]; then
+            if echo "$line" | grep -q '<!-- Items are managed'; then
+                cat "$ITEM_FILE" >> "$TEMP_APPCAST"
+                INSERTED=true
+            elif echo "$line" | grep -q '<language>'; then
+                cat "$ITEM_FILE" >> "$TEMP_APPCAST"
+                INSERTED=true
+            fi
+        fi
+    done < appcast.xml
     mv "$TEMP_APPCAST" appcast.xml
 else
     # Create a fresh appcast.xml
@@ -245,11 +250,12 @@ else
     <channel>
         <title>VibeMeetings Updates</title>
         <language>en</language>
-$NEW_ITEM
+$(cat "$ITEM_FILE")
     </channel>
 </rss>
 APPCAST_EOF
 fi
+rm -f "$ITEM_FILE"
 echo "    appcast.xml updated with download URL: $DOWNLOAD_URL"
 
 # ── Extract release notes from CHANGELOG ─────────────────
