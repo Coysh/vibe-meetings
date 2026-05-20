@@ -3,6 +3,14 @@
     <channel>
         <title>VibeMeetings Updates</title>
         <language>en</language>
+        <item>
+            <title>1.5.0</title>
+            <pubDate>Wed, 20 May 2026 12:59:14 +0100</pubDate>
+            <sparkle:version>202605201258</sparkle:version>
+            <sparkle:shortVersionString>1.5.0</sparkle:shortVersionString>
+            <sparkle:minimumSystemVersion>15.0</sparkle:minimumSystemVersion>
+            <enclosure url="https://github.com/Coysh/vibe-meetings/releases/download/v1.5.0/VibeMeetings.zip" length="7752980" type="application/octet-stream" sparkle:edSignature="fzvNHCzFUqLrJTLAWjjXjurJBqxsZKoz+0PH3EjnqPmipguFlHV8j0H1GNcNDpwmYOf1l5CPrwEoSGfZXE5iCw=="/>
+        </item>
         <!-- Items are managed by release.sh -->
         <item>
             <title>1.4.3</title>
