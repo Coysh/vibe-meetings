@@ -27,6 +27,8 @@ struct PostRecordingSheet: View {
     @State private var selectedFolderURL: URL?
     @State private var availableFolders: [FolderNode] = []
     @State private var autoSuggested = false
+    @State private var showNewFolderField = false
+    @State private var newFolderPath = ""
 
     // Track which fields were pre-filled (to hide them in smart minimal mode)
     @State private var hasCalendarTitle = false
@@ -119,12 +121,46 @@ struct PostRecordingSheet: View {
                                 }
                             }
                             .labelsHidden()
+                            .onChange(of: selectedFolderURL) {
+                                // If user picks a folder, hide the new folder field
+                                if selectedFolderURL != nil {
+                                    showNewFolderField = false
+                                    newFolderPath = ""
+                                }
+                            }
 
-                            if autoSuggested && selectedFolderURL != nil {
+                            if autoSuggested && selectedFolderURL != nil && !showNewFolderField {
                                 Label("Auto-suggested based on meeting metadata", systemImage: "sparkles")
                                     .font(.caption)
                                     .foregroundStyle(.blue)
                             }
+
+                            if showNewFolderField {
+                                VStack(alignment: .leading, spacing: 4) {
+                                    TextField("e.g. Clients/Acme Corp", text: $newFolderPath)
+                                        .textFieldStyle(.roundedBorder)
+                                    Text("Use / to create nested folders")
+                                        .font(.caption2)
+                                        .foregroundStyle(.secondary)
+                                }
+                            }
+
+                            Button {
+                                showNewFolderField.toggle()
+                                if showNewFolderField {
+                                    selectedFolderURL = nil
+                                } else {
+                                    newFolderPath = ""
+                                }
+                            } label: {
+                                Label(
+                                    showNewFolderField ? "Cancel new folder" : "Create new folder",
+                                    systemImage: showNewFolderField ? "xmark" : "folder.badge.plus"
+                                )
+                                .font(.caption)
+                            }
+                            .buttonStyle(.plain)
+                            .foregroundStyle(.blue)
                         }
                     }
                     .padding()
@@ -212,6 +248,11 @@ struct PostRecordingSheet: View {
 
         // Persist metadata.
         try? await env.meetingStore.updateMeeting(m)
+
+        // Create new folder path if user typed one.
+        if showNewFolderField && !newFolderPath.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            selectedFolderURL = await createNestedFolders(path: newFolderPath)
+        }
 
         // Move to selected folder if different from current.
         if let targetURL = selectedFolderURL {
@@ -340,6 +381,35 @@ struct PostRecordingSheet: View {
         }
 
         return nil
+    }
+
+    /// Creates nested folders from a path like "Clients/Acme Corp/Weekly".
+    /// Each component is created in sequence under the root.
+    private func createNestedFolders(path: String) async -> URL? {
+        guard let root = env.folderTree else { return nil }
+        let components = path
+            .split(separator: "/")
+            .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+            .filter { !$0.isEmpty }
+        guard !components.isEmpty else { return nil }
+
+        var currentParent = root
+        for component in components {
+            // Check if this subfolder already exists under currentParent.
+            if let existing = currentParent.children.first(where: {
+                !$0.isMeeting && $0.name.lowercased() == component.lowercased()
+            }) {
+                currentParent = existing
+            } else {
+                // Create the subfolder.
+                if let created = try? await env.meetingStore.createFolder(at: currentParent, name: component) {
+                    currentParent = created
+                } else {
+                    break
+                }
+            }
+        }
+        return currentParent.url
     }
 
     /// Finds a top-level folder that looks like it's for 1:1 meetings

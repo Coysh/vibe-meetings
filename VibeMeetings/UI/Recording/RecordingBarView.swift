@@ -24,6 +24,9 @@ final class RecordingController {
     /// User's free-form notes taken during the meeting.
     var notes: String = ""
 
+    /// Tracks the echo reduction background task so callers can await it.
+    var echoReductionTask: Task<Bool, Never>?
+
     private let env: AppEnvironment
     private let coordinator = AudioCaptureCoordinator()
     private let merger = SegmentMerger()
@@ -196,16 +199,16 @@ final class RecordingController {
         }
         state = .idle
 
-        // Post-process: echo reduction in the background (fire-and-forget).
+        // Post-process: echo reduction in the background.
         if let handle = meetingHandle {
             let folder = MeetingFolder(url: handle.folderURL)
             let inputURL = folder.audioURL
             let outputURL = folder.cleanedAudioURL
-            Task.detached(priority: .utility) {
+            echoReductionTask = Task.detached(priority: .utility) {
                 let fm = FileManager.default
                 guard fm.fileExists(atPath: inputURL.path) else {
                     print("[RecordingController] Echo reduction skipped — audio file not found at \(inputURL.path)")
-                    return
+                    return false
                 }
                 let attrs = try? fm.attributesOfItem(atPath: inputURL.path)
                 let size = (attrs?[.size] as? Int) ?? 0
@@ -218,6 +221,7 @@ final class RecordingController {
                 } else {
                     print("[RecordingController] Echo reduction failed for \(inputURL.lastPathComponent)")
                 }
+                return ok
             }
         }
 

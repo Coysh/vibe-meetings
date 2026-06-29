@@ -2,13 +2,23 @@ import SwiftUI
 import VMCore
 
 struct TranscriptView: View {
-    let segments: [TranscriptSegment]
+    @Binding var segments: [TranscriptSegment]
     let participants: [Speaker]
     var meeting: Meeting?
     @Binding var isSearching: Bool
+    var isEditable: Bool = false
+    var onSave: (([TranscriptSegment]) -> Void)? = nil
     @State private var copied = false
     @State private var searchText = ""
+    @State private var isEditing = false
+    @State private var editingSegmentID: UUID? = nil
+    @State private var editText = ""
+    @State private var showTrimConfirm = false
+    @State private var trimAfterSegmentID: UUID? = nil
+    @State private var selectedSegmentIDs: Set<UUID> = []
+    @State private var showDeleteSelectedConfirm = false
     @FocusState private var searchFocused: Bool
+    @FocusState private var editFocused: Bool
 
     private var nameByID: [String: String] {
         Dictionary(uniqueKeysWithValues: participants.map { ($0.id, $0.displayName) })
@@ -74,6 +84,52 @@ struct TranscriptView: View {
                         .background(.bar)
                     }
                     Spacer()
+                    if isEditable && isEditing {
+                        // Bulk selection controls
+                        HStack(spacing: 6) {
+                            Button {
+                                if selectedSegmentIDs.count == segments.count {
+                                    selectedSegmentIDs.removeAll()
+                                } else {
+                                    selectedSegmentIDs = Set(segments.map(\.id))
+                                }
+                            } label: {
+                                Text(selectedSegmentIDs.count == segments.count ? "Deselect All" : "Select All")
+                                    .font(.caption)
+                            }
+                            .buttonStyle(.bordered)
+                            .controlSize(.small)
+
+                            if !selectedSegmentIDs.isEmpty {
+                                Button(role: .destructive) {
+                                    showDeleteSelectedConfirm = true
+                                } label: {
+                                    Label("Delete \(selectedSegmentIDs.count)", systemImage: "trash")
+                                        .font(.caption)
+                                }
+                                .buttonStyle(.bordered)
+                                .controlSize(.small)
+                            }
+                        }
+                    }
+                    if isEditable {
+                        Button {
+                            if isEditing {
+                                commitEdit()
+                                isEditing = false
+                                selectedSegmentIDs.removeAll()
+                            } else {
+                                isEditing = true
+                            }
+                        } label: {
+                            Label(
+                                isEditing ? "Done Editing" : "Edit",
+                                systemImage: isEditing ? "checkmark.circle" : "pencil"
+                            )
+                        }
+                        .buttonStyle(.bordered)
+                        .controlSize(.small)
+                    }
                     Button {
                         let text = formattedTranscript()
                         NSPasteboard.general.clearContents()
@@ -106,13 +162,113 @@ struct TranscriptView: View {
                                 .padding()
                         }
                         ForEach(segments) { seg in
-                            TranscriptSegmentRow(
-                                segment: seg,
-                                speakerName: nameByID[seg.speakerId] ?? seg.speakerId.capitalized,
-                                searchQuery: isSearching ? searchText : "",
-                                isMatch: matchingIDs.contains(seg.id)
-                            )
+                            HStack(alignment: .top, spacing: 8) {
+                                if isEditing {
+                                    // Selection checkbox for bulk operations
+                                    Button {
+                                        if selectedSegmentIDs.contains(seg.id) {
+                                            selectedSegmentIDs.remove(seg.id)
+                                        } else {
+                                            selectedSegmentIDs.insert(seg.id)
+                                        }
+                                    } label: {
+                                        Image(systemName: selectedSegmentIDs.contains(seg.id)
+                                              ? "checkmark.circle.fill"
+                                              : "circle")
+                                            .foregroundStyle(selectedSegmentIDs.contains(seg.id) ? .blue : .secondary)
+                                    }
+                                    .buttonStyle(.borderless)
+                                    .help("Select this segment")
+                                }
+
+                                if isEditing && editingSegmentID == seg.id {
+                                    // Inline editing
+                                    VStack(alignment: .leading, spacing: 4) {
+                                        HStack(spacing: 8) {
+                                            Text(seg.start.formattedTimestamp)
+                                                .font(.caption.monospacedDigit())
+                                                .foregroundStyle(.tertiary)
+                                            Text(nameByID[seg.speakerId] ?? seg.speakerId.capitalized)
+                                                .font(.caption.bold())
+                                                .foregroundStyle(.secondary)
+                                        }
+                                        TextField("Segment text", text: $editText, axis: .vertical)
+                                            .textFieldStyle(.plain)
+                                            .focused($editFocused)
+                                            .onSubmit {
+                                                commitEdit()
+                                            }
+                                            .padding(6)
+                                            .background(.fill.quaternary, in: RoundedRectangle(cornerRadius: 4))
+                                        HStack(spacing: 8) {
+                                            Button("Save") { commitEdit() }
+                                                .buttonStyle(.borderedProminent)
+                                                .controlSize(.small)
+                                            Button("Cancel") {
+                                                editingSegmentID = nil
+                                                editText = ""
+                                            }
+                                            .buttonStyle(.bordered)
+                                            .controlSize(.small)
+                                        }
+                                    }
+                                } else {
+                                    TranscriptSegmentRow(
+                                        segment: seg,
+                                        speakerName: nameByID[seg.speakerId] ?? seg.speakerId.capitalized,
+                                        searchQuery: isSearching ? searchText : "",
+                                        isMatch: matchingIDs.contains(seg.id)
+                                    )
+                                    .onTapGesture {
+                                        if isEditing {
+                                            commitEdit()
+                                            editingSegmentID = seg.id
+                                            editText = seg.text
+                                            editFocused = true
+                                        }
+                                    }
+                                }
+                            }
                             .id(seg.id)
+                            .contextMenu {
+                                if isEditable {
+                                    Button {
+                                        if !isEditing { isEditing = true }
+                                        commitEdit()
+                                        editingSegmentID = seg.id
+                                        editText = seg.text
+                                        editFocused = true
+                                    } label: {
+                                        Label("Edit Segment", systemImage: "pencil")
+                                    }
+                                    Button(role: .destructive) {
+                                        if !isEditing { isEditing = true }
+                                        deleteSegment(seg.id)
+                                    } label: {
+                                        Label("Delete Segment", systemImage: "trash")
+                                    }
+                                    Divider()
+                                    Button {
+                                        if !isEditing { isEditing = true }
+                                        selectFromHereToEnd(seg.id)
+                                    } label: {
+                                        Label("Select From Here to End", systemImage: "arrow.down.to.line")
+                                    }
+                                    Button {
+                                        if !isEditing { isEditing = true }
+                                        selectFromStartToHere(seg.id)
+                                    } label: {
+                                        Label("Select From Start to Here", systemImage: "arrow.up.to.line")
+                                    }
+                                    Divider()
+                                    Button(role: .destructive) {
+                                        trimAfterSegmentID = seg.id
+                                        showTrimConfirm = true
+                                    } label: {
+                                        Label("Trim After This Segment", systemImage: "scissors")
+                                    }
+                                }
+                            }
                         }
                     }
                     .padding()
@@ -135,6 +291,84 @@ struct TranscriptView: View {
                 searchText = ""
             }
         }
+        .alert("Trim Transcript", isPresented: $showTrimConfirm) {
+            Button("Cancel", role: .cancel) {
+                trimAfterSegmentID = nil
+            }
+            Button("Trim", role: .destructive) {
+                if let trimID = trimAfterSegmentID {
+                    trimAfterSegment(trimID)
+                    trimAfterSegmentID = nil
+                }
+            }
+        } message: {
+            if let trimID = trimAfterSegmentID,
+               let idx = segments.firstIndex(where: { $0.id == trimID }) {
+                let count = segments.count - idx - 1
+                Text("This will remove \(count) segment\(count == 1 ? "" : "s") after this point. This cannot be undone.")
+            } else {
+                Text("Remove all segments after this point?")
+            }
+        }
+        .alert("Delete Selected Segments", isPresented: $showDeleteSelectedConfirm) {
+            Button("Cancel", role: .cancel) {}
+            Button("Delete \(selectedSegmentIDs.count) Segments", role: .destructive) {
+                deleteSelected()
+            }
+        } message: {
+            Text("This will remove \(selectedSegmentIDs.count) segment\(selectedSegmentIDs.count == 1 ? "" : "s"). This cannot be undone.")
+        }
+    }
+
+    // MARK: - Editing helpers
+
+    private func commitEdit() {
+        guard let editID = editingSegmentID else { return }
+        let trimmed = editText.trimmingCharacters(in: .whitespacesAndNewlines)
+        if !trimmed.isEmpty, let idx = segments.firstIndex(where: { $0.id == editID }) {
+            segments[idx].text = trimmed
+            onSave?(segments)
+        }
+        editingSegmentID = nil
+        editText = ""
+    }
+
+    private func deleteSegment(_ id: UUID) {
+        segments.removeAll { $0.id == id }
+        if editingSegmentID == id {
+            editingSegmentID = nil
+            editText = ""
+        }
+        onSave?(segments)
+    }
+
+    private func trimAfterSegment(_ id: UUID) {
+        guard let idx = segments.firstIndex(where: { $0.id == id }) else { return }
+        segments = Array(segments.prefix(through: idx))
+        editingSegmentID = nil
+        editText = ""
+        selectedSegmentIDs.removeAll()
+        onSave?(segments)
+    }
+
+    private func deleteSelected() {
+        segments.removeAll { selectedSegmentIDs.contains($0.id) }
+        editingSegmentID = nil
+        editText = ""
+        selectedSegmentIDs.removeAll()
+        onSave?(segments)
+    }
+
+    private func selectFromHereToEnd(_ id: UUID) {
+        guard let idx = segments.firstIndex(where: { $0.id == id }) else { return }
+        let ids = segments[idx...].map(\.id)
+        selectedSegmentIDs.formUnion(ids)
+    }
+
+    private func selectFromStartToHere(_ id: UUID) {
+        guard let idx = segments.firstIndex(where: { $0.id == id }) else { return }
+        let ids = segments[...idx].map(\.id)
+        selectedSegmentIDs.formUnion(ids)
     }
 
     /// Formats the transcript as clean plain text suitable for pasting into an LLM.

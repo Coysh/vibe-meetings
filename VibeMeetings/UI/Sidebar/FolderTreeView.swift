@@ -16,7 +16,7 @@ struct FolderTreeView: View {
     @State private var renameTarget: RenameTarget?
     @State private var deleteTarget: DeleteTarget?
     @State private var bulkDeleteItems: [BulkDeleteItem]?
-    @State private var viewMode: SidebarViewMode = .folders
+    @State private var viewMode: SidebarViewMode = .recent
     @State private var searchText = ""
     @State private var contentMatchIDs: Set<UUID> = []
     @State private var searchTask: Task<Void, Never>?
@@ -80,20 +80,15 @@ struct FolderTreeView: View {
             upcomingEvents = await env.calendarService.upcomingEvents(within: 24 * 60 * 60)
         }
         .toolbar {
-            ToolbarItemGroup(placement: .secondaryAction) {
-                Button {
-                    newFolderTarget = currentFolder() ?? root
-                } label: {
-                    Image(systemName: "folder.badge.plus")
-                }
-                .help("New folder \(currentFolder().map { "in \($0.name)" } ?? "")")
-
+            ToolbarItem(placement: .primaryAction) {
                 Button {
                     NotificationCenter.default.post(name: .newMeetingRequested, object: nil)
                 } label: {
-                    Image(systemName: "plus.circle")
+                    Label("New Recording", systemImage: "record.circle")
                 }
-                .help("New meeting in selected folder")
+                .buttonStyle(.borderedProminent)
+                .tint(.red)
+                .help("Start a new recording (⌘N)")
             }
         }
         .sheet(item: $newFolderTarget) { target in
@@ -301,6 +296,18 @@ struct FolderTreeView: View {
                 }
             } else {
                 List(selection: $selection) {
+                    // Upcoming meetings from calendar.
+                    let upcoming = futureCalendarEvents
+                    if !upcoming.isEmpty {
+                        Section {
+                            ForEach(upcoming) { event in
+                                upcomingEventRow(event: event)
+                            }
+                        } header: {
+                            Text("Upcoming")
+                        }
+                    }
+
                     OutlineGroup(root.children, id: \.id, children: \.optionalChildren) { node in
                         row(for: node)
                             .tag(tag(for: node))

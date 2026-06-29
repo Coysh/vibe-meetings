@@ -32,11 +32,20 @@ struct MeetingDetailView: View {
         env.summaryService.isRunning(for: meetingID)
     }
 
+    /// Whether this meeting is currently being recorded live.
+    private var isLiveRecording: Bool {
+        if let controller = env.activeRecordingController,
+           controller.meetingHandle?.meeting.id == meetingID {
+            return true
+        }
+        return false
+    }
+
     /// When the active recording targets this meeting, show live segments
     /// instead of (empty) on-disk segments.
     private var displaySegments: [TranscriptSegment] {
-        if let controller = env.activeRecordingController,
-           controller.meetingHandle?.meeting.id == meetingID,
+        if isLiveRecording,
+           let controller = env.activeRecordingController,
            !controller.liveSegments.isEmpty {
             return controller.liveSegments
         }
@@ -49,7 +58,7 @@ struct MeetingDetailView: View {
                 header(meeting: handle.meeting)
                 Divider()
                 Picker("", selection: $selectedTab) {
-                    ForEach(Tab.allCases) { t in
+                    ForEach(Tab.allCases, id: \.self) { t in
                         Text(t.rawValue.capitalized).tag(t)
                     }
                 }
@@ -60,7 +69,27 @@ struct MeetingDetailView: View {
                     switch selectedTab {
                     case .transcript:
                         VStack(spacing: 0) {
-                            TranscriptView(segments: displaySegments, participants: handle.meeting.participants, meeting: handle.meeting, isSearching: $isSearchingTranscript)
+                            if isLiveRecording {
+                                TranscriptView(
+                                    segments: .constant(displaySegments),
+                                    participants: handle.meeting.participants,
+                                    meeting: handle.meeting,
+                                    isSearching: $isSearchingTranscript
+                                )
+                            } else {
+                                TranscriptView(
+                                    segments: $segments,
+                                    participants: handle.meeting.participants,
+                                    meeting: handle.meeting,
+                                    isSearching: $isSearchingTranscript,
+                                    isEditable: true,
+                                    onSave: { updatedSegments in
+                                        Task {
+                                            try? await env.meetingStore.replaceTranscript(updatedSegments, for: meetingID)
+                                        }
+                                    }
+                                )
+                            }
                             Divider()
                             HStack {
                                 Spacer()

@@ -1,4 +1,6 @@
 import SwiftUI
+import AVFoundation
+import EventKit
 import VMCore
 import VMStorage
 import VMSummarization
@@ -92,6 +94,14 @@ struct RootView: View {
         }
         .task {
             let env = self.env
+
+            // Request permissions on every launch. If already granted these are
+            // no-ops; if macOS reset them after an app update (ad-hoc signing
+            // changes the code identity) the user gets re-prompted immediately
+            // instead of discovering broken features later.
+            _ = await AVCaptureDevice.requestAccess(for: .audio)
+            _ = await env.calendarService.requestAccess()
+
             env.bannerCoordinator.setIsRecordingProvider {
                 env.activeRecordingController?.state == .recording
             }
@@ -177,6 +187,7 @@ struct RootView: View {
     /// Captures the meeting info from the just-finished recording, clears the
     /// recording controller, presents the post-recording metadata sheet, and
     /// kicks off background summary generation automatically.
+    /// When cleaned audio is available, re-transcribes it for a better summary.
     private func handleRecordingStopped() {
         guard let controller = env.activeRecordingController,
               let handle = controller.meetingHandle else {
@@ -195,29 +206,62 @@ struct RootView: View {
         let meeting = handle.meeting
         let userNotes = controller.notes.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
             ? nil : controller.notes
+        let echoTask = controller.echoReductionTask
 
         env.activeRecordingController = nil
         postRecordingFolderURL = folderURL
         postRecordingMeetingID = meetingID
 
         // Auto-generate summary in the background (silently, no notification).
-        if !segments.isEmpty {
-            let modelId = env.activeSummarizationKind == OpenAIEngine.kind
-                ? env.selectedOpenAIModelId
-                : env.selectedOllamaModelId
-            let prompt = env.customSystemPrompt.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
-                ? nil : env.customSystemPrompt
+        // If echo reduction succeeds, re-transcribe the cleaned audio for better results.
+        guard !segments.isEmpty else { return }
 
-            env.summaryService.generate(
+        let modelId = env.activeSummarizationKind == OpenAIEngine.kind
+            ? env.selectedOpenAIModelId
+            : env.selectedOllamaModelId
+        let prompt = env.customSystemPrompt.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+            ? nil : env.customSystemPrompt
+        let engine = env.summarizationEngine
+        let transcriptionEngine = env.activeTranscriptionEngine
+        let store = env.meetingStore
+        let summaryService = env.summaryService
+        let cleanedAudioURL = MeetingFolder(url: folderURL).cleanedAudioURL
+
+        Task {
+            var summarySegments = segments
+
+            // Wait for echo reduction, then re-transcribe cleaned audio.
+            if let echoTask {
+                let echoOK = await echoTask.value
+                if echoOK {
+                    print("[RootView] Echo reduction done, re-transcribing cleaned audio for summary...")
+                    do {
+                        let cleanedSegments = try await transcriptionEngine.transcribeFile(
+                            at: cleanedAudioURL,
+                            options: TranscriptionOptions()
+                        )
+                        if !cleanedSegments.isEmpty {
+                            summarySegments = cleanedSegments
+                            // Also update the stored transcript with the cleaner version.
+                            try? await store.replaceTranscript(cleanedSegments, for: meetingID)
+                            print("[RootView] Replaced transcript with \(cleanedSegments.count) cleaned segments")
+                        }
+                    } catch {
+                        print("[RootView] Re-transcription failed, using live segments: \(error)")
+                    }
+                }
+            }
+
+            summaryService.generate(
                 meetingID: meetingID,
                 meetingTitle: meeting.title,
-                segments: segments,
+                segments: summarySegments,
                 meeting: meeting,
-                engine: env.summarizationEngine,
+                engine: engine,
                 modelId: modelId,
                 userNotes: userNotes,
                 customPrompt: prompt,
-                store: env.meetingStore,
+                store: store,
                 silent: true
             )
         }
