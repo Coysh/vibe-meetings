@@ -334,7 +334,7 @@ final class BannerCoordinator {
 
             let content = UNMutableNotificationContent()
             content.title = event.title
-            let minutesUntil = Int(ceil(event.startDate.timeIntervalSince(now) / 60))
+            let minutesUntil = Int(ceil(reminderLeadTime / 60))
             content.body = "Starting in \(minutesUntil) minute\(minutesUntil == 1 ? "" : "s")"
             content.sound = .default
 
