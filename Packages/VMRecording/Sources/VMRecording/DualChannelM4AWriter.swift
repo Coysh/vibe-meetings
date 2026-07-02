@@ -136,6 +136,18 @@ public final class DualChannelM4AWriter: @unchecked Sendable {
                 self.writeFrames(n, micN: micN, sysN: sysN)
             }
             print("[M4AWriter] stop: \(self.flushCount) flushes, \(self.sampleIndex) total samples, writer status=\(self.writer.status.rawValue)")
+
+            // `markAsFinished()` and `finishWriting` may only be called while the
+            // writer is actively `.writing`. If the meeting ended before any audio
+            // was captured (so `start()`/`startWriting()` never ran, leaving status
+            // `.unknown`), or the writer already failed/completed, calling them throws
+            // an uncatchable NSInternalInconsistencyException that aborts the process.
+            guard self.isStarted, self.writer.status == .writing else {
+                print("[M4AWriter] stop: writer not in .writing state (status=\(self.writer.status.rawValue)), skipping finishWriting")
+                completion(nil)
+                return
+            }
+
             self.input.markAsFinished()
             self.writer.finishWriting {
                 let url = self.writer.status == .completed ? self.writer.outputURL : nil

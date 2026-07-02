@@ -7,6 +7,9 @@ versioned with [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Fixed
+- Crash (abort in `AVAssetWriter.finishWriting`) when ending a meeting where the audio writer never started or had already failed
+
 ## [1.5.0] - 2026-05-14
 
 ### Added
