@@ -7,6 +7,17 @@ versioned with [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [1.6.0] - 2026-07-02
+
+### Added
+- Crash failsafe: recordings now survive an unexpected crash, force-quit, or power loss
+  - The transcript is checkpointed to disk every 10 seconds while recording, so at most a few seconds of speech can be lost
+  - Audio is streamed to a crash-safe WAV sidecar in parallel with the compressed m4a; the WAV stays valid the moment each sample hits disk (unlike the m4a, which is only playable once the meeting ends cleanly)
+  - On the next launch, any meeting whose recording was interrupted is automatically salvaged — its audio is repaired and made playable, an end time is stamped, and it is tagged `recovered`. Recovered audio appears in the meeting's Audio tab
+
+### Changed
+- Opening a past meeting now defaults to the **Summary** tab instead of Transcript (live, in-progress meetings still open on Transcript)
+
 ## [1.5.3] - 2026-07-02
 ### Fixed
 - Crash (abort in `AVAssetWriter.finishWriting`) when ending a meeting where the audio writer never started or had already failed

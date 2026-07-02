@@ -141,6 +141,12 @@ final class AppEnvironment {
         }
 
         self.rootURL = resolvedRoot
+
+        // Failsafe: before the store scans, salvage any meeting whose recording
+        // was cut short by a crash/force-quit — repair its crash-safe audio and
+        // stamp an end time so the checkpointed transcript + audio are retrievable.
+        RecordingRecoveryService.recoverInterruptedMeetings(in: resolvedRoot)
+
         self.meetingStore = try FilesystemMeetingStore(rootURL: resolvedRoot)
 
         let whisperKit = WhisperKitEngine()

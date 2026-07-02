@@ -11,7 +11,10 @@ struct MeetingDetailView: View {
     @State private var segments: [TranscriptSegment] = []
     @State private var summary: String = ""
     @State private var notes: String = ""
-    @State private var selectedTab: Tab = .transcript
+    @State private var selectedTab: Tab = .summary
+    /// Ensures we only pick the initial tab once per opened meeting, so later
+    /// reloads (e.g. when a recording stops) don't yank the user off their tab.
+    @State private var didChooseInitialTab = false
     @State private var editableMeeting: Meeting?
     @State private var showImportTranscript = false
     @State private var importTranscriptText = ""
@@ -355,8 +358,11 @@ struct MeetingDetailView: View {
 
     @ViewBuilder
     private func audioTab(handle: MeetingHandle) -> some View {
+        let fm = FileManager.default
         let folder = MeetingFolder(url: handle.folderURL)
-        let cleanedExists = FileManager.default.fileExists(atPath: folder.cleanedAudioURL.path)
+        let cleanedExists = fm.fileExists(atPath: folder.cleanedAudioURL.path)
+        let originalExists = fm.fileExists(atPath: folder.audioURL.path)
+        let recoveredExists = fm.fileExists(atPath: folder.recoveredAudioURL.path)
         VStack(spacing: 0) {
             if cleanedExists {
                 // Show both players with labels.
@@ -369,8 +375,22 @@ struct MeetingDetailView: View {
                     }
                 }
                 .padding()
+            } else if originalExists {
+                AudioPlaybackView(audioURL: handle.audioURL ?? folder.audioURL)
+            } else if recoveredExists {
+                // Recording was interrupted; this is the salvaged crash-safe audio.
+                VStack(spacing: 12) {
+                    Label("Recovered recording — salvaged after the app closed unexpectedly. Uncompressed and not echo-reduced.",
+                          systemImage: "exclamationmark.arrow.circlepath")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .multilineTextAlignment(.center)
+                        .padding(.horizontal)
+                    AudioPlaybackView(audioURL: folder.recoveredAudioURL)
+                }
+                .padding()
             } else {
-                AudioPlaybackView(audioURL: handle.audioURL)
+                AudioPlaybackView(audioURL: nil)
             }
         }
     }
@@ -416,6 +436,13 @@ struct MeetingDetailView: View {
             self.segments = (try? await env.meetingStore.loadTranscript(for: meetingID)) ?? []
             self.summary = (try? await env.meetingStore.loadSummary(for: meetingID)) ?? ""
             self.notes = (try? await env.meetingStore.loadNotes(for: meetingID)) ?? ""
+
+            // Default to Summary when opening a past meeting; while a meeting is
+            // still recording live, Transcript is the useful view.
+            if !didChooseInitialTab {
+                didChooseInitialTab = true
+                selectedTab = isLiveRecording ? .transcript : .summary
+            }
         } catch {
             print("Could not load meeting \(meetingID): \(error)")
         }
