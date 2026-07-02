@@ -7,8 +7,11 @@ versioned with [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [1.5.3] - 2026-07-02
 ### Fixed
 - Crash (abort in `AVAssetWriter.finishWriting`) when ending a meeting where the audio writer never started or had already failed
+
+
 
 ## [1.5.0] - 2026-05-14
 
@@ -103,7 +106,8 @@ versioned with [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - Microphone device selection in Settings
 - Resume recording for existing meetings
 
-[Unreleased]: https://github.com/Coysh/vibe-meetings/compare/v1.5.0...HEAD
+[Unreleased]: https://github.com/Coysh/vibe-meetings/compare/v1.5.3...HEAD
+[1.5.3]: https://github.com/Coysh/vibe-meetings/compare/v1.3.0...v1.5.3
 [1.5.0]: https://github.com/Coysh/vibe-meetings/compare/v1.3.0...v1.5.0
 [1.3.0]: https://github.com/Coysh/vibe-meetings/compare/v1.2.0...v1.3.0
 [1.2.0]: https://github.com/Coysh/vibe-meetings/compare/v1.1.0...v1.2.0
