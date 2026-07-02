@@ -25,9 +25,20 @@ public final class DualChannelM4AWriter: @unchecked Sendable {
     private let micConverter = AudioFormatConverter48kMono()
     private let sysConverter = AudioFormatConverter48kMono()
 
+    /// Crash-safe raw WAV sidecar. Written on the same serial `queue` as the
+    /// m4a, deleted on a clean stop. Survives a crash for recovery on relaunch.
+    private let wavWriter: CrashSafeWAVWriter?
+    private let wavURL: URL?
+
     public init(url: URL) throws {
         try? FileManager.default.removeItem(at: url)
         self.writer = try AVAssetWriter(outputURL: url, fileType: .m4a)
+
+        // Sibling crash-safe WAV: same folder, fixed filename. Best-effort —
+        // if it can't be opened we still record to the m4a as before.
+        let wavSibling = url.deletingLastPathComponent().appendingPathComponent("audio-partial.wav")
+        self.wavURL = wavSibling
+        self.wavWriter = try? CrashSafeWAVWriter(url: wavSibling)
 
         let settings: [String: Any] = [
             AVFormatIDKey: kAudioFormatMPEG4AAC,
@@ -112,6 +123,9 @@ public final class DualChannelM4AWriter: @unchecked Sendable {
             int16[i * 2]     = floatToInt16(micSample)
             int16[i * 2 + 1] = floatToInt16(sysSample)
         }
+        // Durably append these samples to the crash-safe WAV sidecar first, so a
+        // crash between here and finishWriting still leaves recoverable audio.
+        wavWriter?.append(int16)
         if micN >= n { micBuffer.removeFirst(n) } else { micBuffer.removeAll() }
         if sysN >= n { sysBuffer.removeFirst(n) } else { sysBuffer.removeAll() }
 
@@ -144,19 +158,36 @@ public final class DualChannelM4AWriter: @unchecked Sendable {
             // an uncatchable NSInternalInconsistencyException that aborts the process.
             guard self.isStarted, self.writer.status == .writing else {
                 print("[M4AWriter] stop: writer not in .writing state (status=\(self.writer.status.rawValue)), skipping finishWriting")
+                // The m4a is unusable, but the WAV sidecar holds everything we
+                // captured — finalize it so it's playable and keep it around.
+                self.finalizeWAVAsFallback()
                 completion(nil)
                 return
             }
 
             self.input.markAsFinished()
             self.writer.finishWriting {
-                let url = self.writer.status == .completed ? self.writer.outputURL : nil
-                if self.writer.status != .completed {
-                    print("[M4AWriter] finishWriting failed: status=\(self.writer.status.rawValue), error=\(String(describing: self.writer.error))")
+                self.queue.async {
+                    let completed = self.writer.status == .completed
+                    let url = completed ? self.writer.outputURL : nil
+                    if completed {
+                        // m4a is authoritative — drop the sidecar.
+                        self.wavWriter?.close()
+                        if let wavURL = self.wavURL { try? FileManager.default.removeItem(at: wavURL) }
+                    } else {
+                        print("[M4AWriter] finishWriting failed: status=\(self.writer.status.rawValue), error=\(String(describing: self.writer.error))")
+                        self.finalizeWAVAsFallback()
+                    }
+                    completion(url)
                 }
-                completion(url)
             }
         }
+    }
+
+    /// Patch the WAV header so the captured audio is playable, leaving the file
+    /// in place as the recording of record when the m4a couldn't be finalized.
+    private func finalizeWAVAsFallback() {
+        wavWriter?.finalize()
     }
 
     /// Convert Float32 [-1, 1] to Int16 with clamping.

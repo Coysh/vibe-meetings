@@ -33,6 +33,10 @@ final class RecordingController {
     private var streamTasks: [Task<Void, Never>] = []
     private var clockTask: Task<Void, Never>?
     private var pumpTask: Task<Void, Never>?
+    /// Periodically flushes the live transcript to disk so a crash mid-meeting
+    /// never loses more than one interval's worth of speech.
+    private var checkpointTask: Task<Void, Never>?
+    private static let checkpointInterval: Duration = .seconds(10)
     /// Tracks the last mic UID we configured so we can detect settings changes.
     private var currentMicUID: String?
 
@@ -149,6 +153,30 @@ final class RecordingController {
                 self.elapsed = Date().timeIntervalSince(started)
             }
         }
+
+        // Crash failsafe: checkpoint the transcript to disk on a timer. The
+        // meeting keeps `endedAt == nil` while live, so if we crash the launch
+        // recovery finds this checkpoint (and the crash-safe audio) intact.
+        let meetingID = handle.meeting.id
+        checkpointTask = Task { [weak self] in
+            while !Task.isCancelled {
+                try? await Task.sleep(for: Self.checkpointInterval)
+                guard let self, self.state == .recording else { continue }
+                await self.checkpointTranscript(meetingID: meetingID)
+            }
+        }
+    }
+
+    /// Persist the current merged transcript to disk mid-recording. Segments are
+    /// promoted to final so a recovered transcript reads cleanly.
+    private func checkpointTranscript(meetingID: UUID) async {
+        let snapshot = merger.snapshot().map { seg -> TranscriptSegment in
+            var s = seg
+            s.isPartial = false
+            return s
+        }
+        guard !snapshot.isEmpty else { return }
+        try? await env.meetingStore.replaceTranscript(snapshot, for: meetingID)
     }
 
     /// Switch the microphone mid-recording when the user changes it in Settings.
@@ -175,6 +203,7 @@ final class RecordingController {
         for t in streamTasks { t.cancel() }
         streamTasks.removeAll()
         clockTask?.cancel(); clockTask = nil
+        checkpointTask?.cancel(); checkpointTask = nil
 
         if let handle = meetingHandle {
             // Persist transcript. In streaming mode every segment is marked
