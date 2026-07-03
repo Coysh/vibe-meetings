@@ -43,6 +43,26 @@ if ! gh auth status &>/dev/null; then
     exit 1
 fi
 
+# ── Sync with remote ─────────────────────────────────────
+# PRs merged on GitHub leave origin/main ahead of local main; without this
+# the final `git push origin main` is rejected as non-fast-forward and the
+# script aborts after tagging but before publishing the release.
+echo "==> Syncing with origin..."
+git fetch origin
+CURRENT_BRANCH=$(git rev-parse --abbrev-ref HEAD)
+
+if git rev-parse --verify --quiet "origin/$CURRENT_BRANCH" >/dev/null; then
+    git merge "origin/$CURRENT_BRANCH" --no-edit
+fi
+
+if [ "$CURRENT_BRANCH" != "main" ]; then
+    git checkout main
+    git merge origin/main --no-edit
+    git checkout "$CURRENT_BRANCH"
+else
+    git merge origin/main --no-edit
+fi
+
 # ── Update CHANGELOG ────────────────────────────────────
 echo "==> Updating CHANGELOG.md..."
 if [ -f "$CHANGELOG" ]; then
