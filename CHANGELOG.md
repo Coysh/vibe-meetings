@@ -7,8 +7,11 @@ versioned with [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [1.6.4] - 2026-07-03
 ### Fixed
 - Echo suppression now catches *partial* echo — when the other party's voice bleeds in at low level and the mic transcribes it imperfectly (dropping words), `EchoDedup` previously kept the garbled "You" copy because a symmetric word-overlap score fell below threshold. It now scores directional containment (how much of the mic text is covered by the clean system channel), so degraded echo is removed while genuine speech spoken over the other party is preserved
+
+
 
 ## [1.6.1] - 2026-07-03
 
@@ -127,7 +130,8 @@ versioned with [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - Microphone device selection in Settings
 - Resume recording for existing meetings
 
-[Unreleased]: https://github.com/Coysh/vibe-meetings/compare/v1.5.3...HEAD
+[Unreleased]: https://github.com/Coysh/vibe-meetings/compare/v1.6.4...HEAD
+[1.6.4]: https://github.com/Coysh/vibe-meetings/compare/v1.5.0...v1.6.4
 [1.5.3]: https://github.com/Coysh/vibe-meetings/compare/v1.3.0...v1.5.3
 [1.5.0]: https://github.com/Coysh/vibe-meetings/compare/v1.3.0...v1.5.0
 [1.3.0]: https://github.com/Coysh/vibe-meetings/compare/v1.2.0...v1.3.0
