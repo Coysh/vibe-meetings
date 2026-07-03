@@ -155,123 +155,28 @@ struct TranscriptView: View {
 
             ScrollViewReader { proxy in
                 ScrollView {
-                    LazyVStack(alignment: .leading, spacing: 16) {
+                    LazyVStack(alignment: .leading, spacing: 20) {
                         if segments.isEmpty {
                             Text("No transcript yet — start a recording to see live captions here.")
                                 .foregroundStyle(.secondary)
                                 .padding()
                         }
-                        ForEach(segments) { seg in
-                            HStack(alignment: .top, spacing: 8) {
-                                if isEditing {
-                                    // Selection checkbox for bulk operations
-                                    Button {
-                                        if selectedSegmentIDs.contains(seg.id) {
-                                            selectedSegmentIDs.remove(seg.id)
-                                        } else {
-                                            selectedSegmentIDs.insert(seg.id)
-                                        }
-                                    } label: {
-                                        Image(systemName: selectedSegmentIDs.contains(seg.id)
-                                              ? "checkmark.circle.fill"
-                                              : "circle")
-                                            .foregroundStyle(selectedSegmentIDs.contains(seg.id) ? .blue : .secondary)
-                                    }
-                                    .buttonStyle(.borderless)
-                                    .help("Select this segment")
-                                }
-
-                                if isEditing && editingSegmentID == seg.id {
-                                    // Inline editing
-                                    VStack(alignment: .leading, spacing: 4) {
-                                        HStack(spacing: 8) {
-                                            Text(seg.start.formattedTimestamp)
-                                                .font(.caption.monospacedDigit())
-                                                .foregroundStyle(.tertiary)
-                                            Text(nameByID[seg.speakerId] ?? seg.speakerId.capitalized)
-                                                .font(.caption.bold())
-                                                .foregroundStyle(.secondary)
-                                        }
-                                        TextField("Segment text", text: $editText, axis: .vertical)
-                                            .textFieldStyle(.plain)
-                                            .focused($editFocused)
-                                            .onSubmit {
-                                                commitEdit()
-                                            }
-                                            .padding(6)
-                                            .background(.fill.quaternary, in: RoundedRectangle(cornerRadius: 4))
-                                        HStack(spacing: 8) {
-                                            Button("Save") { commitEdit() }
-                                                .buttonStyle(.borderedProminent)
-                                                .controlSize(.small)
-                                            Button("Cancel") {
-                                                editingSegmentID = nil
-                                                editText = ""
-                                            }
-                                            .buttonStyle(.bordered)
-                                            .controlSize(.small)
-                                        }
-                                    }
-                                } else {
-                                    TranscriptSegmentRow(
-                                        segment: seg,
-                                        speakerName: nameByID[seg.speakerId] ?? seg.speakerId.capitalized,
-                                        searchQuery: isSearching ? searchText : "",
-                                        isMatch: matchingIDs.contains(seg.id)
-                                    )
-                                    .onTapGesture {
-                                        if isEditing {
-                                            commitEdit()
-                                            editingSegmentID = seg.id
-                                            editText = seg.text
-                                            editFocused = true
-                                        }
-                                    }
-                                }
-                            }
-                            .id(seg.id)
-                            .contextMenu {
-                                if isEditable {
-                                    Button {
-                                        if !isEditing { isEditing = true }
-                                        commitEdit()
-                                        editingSegmentID = seg.id
-                                        editText = seg.text
-                                        editFocused = true
-                                    } label: {
-                                        Label("Edit Segment", systemImage: "pencil")
-                                    }
-                                    Button(role: .destructive) {
-                                        if !isEditing { isEditing = true }
-                                        deleteSegment(seg.id)
-                                    } label: {
-                                        Label("Delete Segment", systemImage: "trash")
-                                    }
-                                    Divider()
-                                    Button {
-                                        if !isEditing { isEditing = true }
-                                        selectFromHereToEnd(seg.id)
-                                    } label: {
-                                        Label("Select From Here to End", systemImage: "arrow.down.to.line")
-                                    }
-                                    Button {
-                                        if !isEditing { isEditing = true }
-                                        selectFromStartToHere(seg.id)
-                                    } label: {
-                                        Label("Select From Start to Here", systemImage: "arrow.up.to.line")
-                                    }
-                                    Divider()
-                                    Button(role: .destructive) {
-                                        trimAfterSegmentID = seg.id
-                                        showTrimConfirm = true
-                                    } label: {
-                                        Label("Trim After This Segment", systemImage: "scissors")
-                                    }
+                        // Consecutive segments from one speaker render as a
+                        // single paragraph block under one header, so the
+                        // transcript reads like a conversation instead of a
+                        // wall of timestamped fragments.
+                        ForEach(groupedSegments) { group in
+                            VStack(alignment: .leading, spacing: 3) {
+                                groupHeader(group)
+                                ForEach(group.segments) { seg in
+                                    segmentRow(seg)
                                 }
                             }
                         }
                     }
-                    .padding()
+                    .padding(.horizontal)
+                    .padding(.vertical, 12)
+                    .textSelection(.enabled)
                 }
                 .onChange(of: segments.last?.id) { _, newID in
                     if let newID, !isSearching { withAnimation { proxy.scrollTo(newID, anchor: .bottom) } }
@@ -320,6 +225,171 @@ struct TranscriptView: View {
         }
     }
 
+    // MARK: - Grouping & rows
+
+    /// A maximal run of consecutive segments from one speaker.
+    private struct SpeakerGroup: Identifiable {
+        /// Distinct from any segment id so the group's ForEach identity never
+        /// collides with a child row's `.id(seg.id)` in the ScrollViewReader
+        /// namespace (which would make `scrollTo` undefined).
+        let id: String
+        let speakerId: String
+        let channel: AudioChannel
+        let start: TimeInterval
+        let segments: [TranscriptSegment]
+    }
+
+    private var groupedSegments: [SpeakerGroup] {
+        var result: [SpeakerGroup] = []
+        var bucket: [TranscriptSegment] = []
+        func flush() {
+            guard let first = bucket.first else { return }
+            result.append(SpeakerGroup(
+                id: "grp-\(first.id.uuidString)",
+                speakerId: first.speakerId,
+                channel: first.channel,
+                start: first.start,
+                segments: bucket
+            ))
+            bucket.removeAll()
+        }
+        for seg in segments {
+            if let last = bucket.last, last.speakerId != seg.speakerId { flush() }
+            bucket.append(seg)
+        }
+        flush()
+        return result
+    }
+
+    @ViewBuilder
+    private func groupHeader(_ group: SpeakerGroup) -> some View {
+        HStack(spacing: 8) {
+            Text(nameByID[group.speakerId] ?? group.speakerId.capitalized)
+                .font(.subheadline.bold())
+                .foregroundStyle(Self.speakerColor(group.channel))
+            Text(group.start.formattedTimestamp)
+                .font(.caption2.monospacedDigit())
+                .foregroundStyle(.tertiary)
+        }
+    }
+
+    @ViewBuilder
+    private func segmentRow(_ seg: TranscriptSegment) -> some View {
+        HStack(alignment: .top, spacing: 8) {
+            if isEditing {
+                // Selection checkbox for bulk operations.
+                Button {
+                    if selectedSegmentIDs.contains(seg.id) {
+                        selectedSegmentIDs.remove(seg.id)
+                    } else {
+                        selectedSegmentIDs.insert(seg.id)
+                    }
+                } label: {
+                    Image(systemName: selectedSegmentIDs.contains(seg.id) ? "checkmark.circle.fill" : "circle")
+                        .foregroundStyle(selectedSegmentIDs.contains(seg.id) ? .blue : .secondary)
+                }
+                .buttonStyle(.borderless)
+                .help("Select this segment")
+            }
+
+            if isEditing && editingSegmentID == seg.id {
+                inlineEditor(seg)
+            } else {
+                TranscriptSegmentRow(
+                    segment: seg,
+                    searchQuery: isSearching ? searchText : "",
+                    isMatch: matchingIDs.contains(seg.id)
+                )
+                .onTapGesture {
+                    if isEditing {
+                        commitEdit()
+                        editingSegmentID = seg.id
+                        editText = seg.text
+                        editFocused = true
+                    }
+                }
+            }
+        }
+        .id(seg.id)
+        .contextMenu { segmentContextMenu(seg) }
+    }
+
+    @ViewBuilder
+    private func inlineEditor(_ seg: TranscriptSegment) -> some View {
+        VStack(alignment: .leading, spacing: 4) {
+            Text(seg.start.formattedTimestamp)
+                .font(.caption.monospacedDigit())
+                .foregroundStyle(.tertiary)
+            TextField("Segment text", text: $editText, axis: .vertical)
+                .textFieldStyle(.plain)
+                .font(.body)
+                .focused($editFocused)
+                .onSubmit { commitEdit() }
+                .padding(6)
+                .background(.fill.quaternary, in: RoundedRectangle(cornerRadius: 4))
+            HStack(spacing: 8) {
+                Button("Save") { commitEdit() }
+                    .buttonStyle(.borderedProminent)
+                    .controlSize(.small)
+                Button("Cancel") {
+                    editingSegmentID = nil
+                    editText = ""
+                }
+                .buttonStyle(.bordered)
+                .controlSize(.small)
+            }
+        }
+    }
+
+    @ViewBuilder
+    private func segmentContextMenu(_ seg: TranscriptSegment) -> some View {
+        if isEditable {
+            Button {
+                if !isEditing { isEditing = true }
+                commitEdit()
+                editingSegmentID = seg.id
+                editText = seg.text
+                editFocused = true
+            } label: {
+                Label("Edit Segment", systemImage: "pencil")
+            }
+            Button(role: .destructive) {
+                if !isEditing { isEditing = true }
+                deleteSegment(seg.id)
+            } label: {
+                Label("Delete Segment", systemImage: "trash")
+            }
+            Divider()
+            Button {
+                if !isEditing { isEditing = true }
+                selectFromHereToEnd(seg.id)
+            } label: {
+                Label("Select From Here to End", systemImage: "arrow.down.to.line")
+            }
+            Button {
+                if !isEditing { isEditing = true }
+                selectFromStartToHere(seg.id)
+            } label: {
+                Label("Select From Start to Here", systemImage: "arrow.up.to.line")
+            }
+            Divider()
+            Button(role: .destructive) {
+                trimAfterSegmentID = seg.id
+                showTrimConfirm = true
+            } label: {
+                Label("Trim After This Segment", systemImage: "scissors")
+            }
+        }
+    }
+
+    static func speakerColor(_ channel: AudioChannel) -> Color {
+        switch channel {
+        case .mic: return .blue
+        case .system: return .purple
+        case .mixed: return .secondary
+        }
+    }
+
     // MARK: - Editing helpers
 
     private func commitEdit() {
@@ -335,6 +405,7 @@ struct TranscriptView: View {
 
     private func deleteSegment(_ id: UUID) {
         segments.removeAll { $0.id == id }
+        selectedSegmentIDs.remove(id)
         if editingSegmentID == id {
             editingSegmentID = nil
             editText = ""
@@ -395,7 +466,7 @@ struct TranscriptView: View {
         var currentSpeaker = ""
         for seg in segments where !seg.isPartial {
             let trimmed = seg.text.trimmingCharacters(in: .whitespaces)
-            if Self.isNoiseSegment(trimmed) { continue }
+            if TranscriptNoiseFilter.isNoise(trimmed, confidence: seg.confidence) { continue }
 
             let name = nameByID[seg.speakerId] ?? seg.speakerId.capitalized
             let timestamp = "[\(seg.start.formattedTimestamp)]"
@@ -411,73 +482,25 @@ struct TranscriptView: View {
         return lines.joined(separator: "\n")
     }
 
-    /// Returns `true` if the segment text is a noise/silence artifact that
-    /// adds no semantic value (e.g. "[silence]", "(keyboard clicking)").
-    private static func isNoiseSegment(_ text: String) -> Bool {
-        let lower = text.lowercased()
-            .trimmingCharacters(in: .whitespacesAndNewlines)
-
-        // Strip bracket/paren wrappers: "[silence]" → "silence", "(keyboard clicking)" → "keyboard clicking"
-        let inner: String
-        if (lower.hasPrefix("[") && lower.hasSuffix("]"))
-            || (lower.hasPrefix("(") && lower.hasSuffix(")")) {
-            inner = String(lower.dropFirst().dropLast())
-                .trimmingCharacters(in: .whitespaces)
-        } else {
-            inner = lower
-        }
-
-        let noisePatterns: Set<String> = [
-            "silence",
-            "light wind",
-            "wind",
-            "bubbling",
-            "keyboard clicking",
-            "keyboard tapping",
-            "keyboard clacking",
-            "typing",
-            "mouse clicking",
-            "clicking",
-            "tapping",
-            "static",
-            "background noise",
-            "inaudible",
-            "unintelligible",
-            "blank audio",
-        ]
-
-        return noisePatterns.contains(inner)
-    }
 }
 
 struct TranscriptSegmentRow: View {
     let segment: TranscriptSegment
-    let speakerName: String
     var searchQuery: String = ""
     var isMatch: Bool = false
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 4) {
-            HStack(spacing: 8) {
-                Text(segment.start.formattedTimestamp)
-                    .font(.caption.monospacedDigit())
-                    .foregroundStyle(.tertiary)
-                Text(speakerName)
-                    .font(.caption.bold())
-                    .foregroundStyle(speakerColor)
-                if segment.isPartial {
-                    Text("…")
-                        .font(.caption)
-                        .foregroundStyle(.tertiary)
-                }
-            }
-            highlightedText(segment.text)
-                .textSelection(.enabled)
-        }
-        .opacity(segment.isPartial ? 0.7 : 1)
-        .padding(.vertical, isMatch ? 2 : 0)
-        .padding(.horizontal, isMatch ? 4 : 0)
-        .background(isMatch ? Color.yellow.opacity(0.12) : Color.clear, in: RoundedRectangle(cornerRadius: 4))
+        // The speaker + timestamp live in the group header; each row is just
+        // the spoken text, at body size for readability. Still-partial live
+        // segments are dimmed to read as "in progress".
+        highlightedText(segment.text)
+            .font(.body)
+            .textSelection(.enabled)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .opacity(segment.isPartial ? 0.55 : 1)
+            .padding(.vertical, isMatch ? 2 : 0)
+            .padding(.horizontal, isMatch ? 4 : 0)
+            .background(isMatch ? Color.yellow.opacity(0.12) : Color.clear, in: RoundedRectangle(cornerRadius: 4))
     }
 
     @ViewBuilder
@@ -504,13 +527,5 @@ struct TranscriptSegmentRow: View {
             searchStart = range.upperBound
         }
         return attributed
-    }
-
-    private var speakerColor: Color {
-        switch segment.channel {
-        case .mic: return .blue
-        case .system: return .purple
-        case .mixed: return .secondary
-        }
     }
 }

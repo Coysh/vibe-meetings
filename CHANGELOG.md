@@ -7,6 +7,13 @@ versioned with [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [1.6.1] - 2026-07-03
+
+### Fixed
+- Garbled, duplicated "You" transcript when not wearing headphones — the other party's voice bleeding from the speakers into the mic is now removed by cross-referencing the clean system-audio channel (`EchoDedup`)
+- Whisper hallucinations and noise (e.g. `[silence]`, "Thanks for watching", "Please subscribe", degenerate word repetition) are now filtered consistently across the live view, the saved transcript, and the LLM export (`TranscriptNoiseFilter`)
+- Resumed recordings no longer overlap or duplicate segments — new live segments are offset past the end of the loaded history
+
 ## [1.6.0] - 2026-07-02
 
 ### Added
