@@ -39,6 +39,11 @@ final class RecordingController {
     private static let checkpointInterval: Duration = .seconds(10)
     /// Tracks the last mic UID we configured so we can detect settings changes.
     private var currentMicUID: String?
+    /// When resuming an existing meeting, the new capture session starts its
+    /// clock at ~0. This offset shifts incoming live segments so they land
+    /// *after* the loaded history instead of colliding with it. 0 for a fresh
+    /// recording.
+    private var timelineOffset: TimeInterval = 0
 
     init(env: AppEnvironment) {
         self.env = env
@@ -57,7 +62,12 @@ final class RecordingController {
             for seg in existing {
                 merger.ingest(seg)
             }
-            liveSegments = merger.snapshot()
+            // The fresh capture session below restarts the clock at ~0, so
+            // offset the new live segments past the end of the loaded history
+            // to avoid overlapping timestamps (which would otherwise interleave
+            // and duplicate in the transcript).
+            timelineOffset = existing.map(\.end).max() ?? 0
+            liveSegments = merger.displaySnapshot()
         }
         // Load existing notes.
         if let existingNotes = try? await env.meetingStore.loadNotes(for: handle.meeting.id) {
@@ -170,11 +180,7 @@ final class RecordingController {
     /// Persist the current merged transcript to disk mid-recording. Segments are
     /// promoted to final so a recovered transcript reads cleanly.
     private func checkpointTranscript(meetingID: UUID) async {
-        let snapshot = merger.snapshot().map { seg -> TranscriptSegment in
-            var s = seg
-            s.isPartial = false
-            return s
-        }
+        let snapshot = merger.finalSnapshot()
         guard !snapshot.isEmpty else { return }
         try? await env.meetingStore.replaceTranscript(snapshot, for: meetingID)
     }
@@ -192,8 +198,13 @@ final class RecordingController {
     }
 
     private func ingest(_ seg: TranscriptSegment) {
+        var seg = seg
+        if timelineOffset > 0 {
+            seg.start += timelineOffset
+            seg.end += timelineOffset
+        }
         merger.ingest(seg)
-        liveSegments = merger.snapshot()
+        liveSegments = merger.displaySnapshot()
     }
 
     func stop() async -> CaptureResult? {
@@ -206,14 +217,9 @@ final class RecordingController {
         checkpointTask?.cancel(); checkpointTask = nil
 
         if let handle = meetingHandle {
-            // Persist transcript. In streaming mode every segment is marked
-            // partial (there's no explicit finalization step), so we promote
-            // all partials to finals before saving.
-            let allSegments = merger.snapshot().map { seg in
-                var s = seg
-                s.isPartial = false
-                return s
-            }
+            // Persist the cleaned, finalized transcript (echo-deduped,
+            // duplicate-collapsed, all partials promoted to final).
+            let allSegments = merger.finalSnapshot()
             try? await env.meetingStore.replaceTranscript(allSegments, for: handle.meeting.id)
 
             // Persist user notes if any were taken.

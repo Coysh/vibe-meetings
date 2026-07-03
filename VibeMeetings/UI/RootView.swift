@@ -186,8 +186,8 @@ struct RootView: View {
 
     /// Captures the meeting info from the just-finished recording, clears the
     /// recording controller, presents the post-recording metadata sheet, and
-    /// kicks off background summary generation automatically.
-    /// When cleaned audio is available, re-transcribes it for a better summary.
+    /// kicks off background summary generation automatically from the
+    /// dual-channel (You/Others) transcript.
     private func handleRecordingStopped() {
         guard let controller = env.activeRecordingController,
               let handle = controller.meetingHandle else {
@@ -206,14 +206,17 @@ struct RootView: View {
         let meeting = handle.meeting
         let userNotes = controller.notes.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
             ? nil : controller.notes
-        let echoTask = controller.echoReductionTask
 
         env.activeRecordingController = nil
         postRecordingFolderURL = folderURL
         postRecordingMeetingID = meetingID
 
-        // Auto-generate summary in the background (silently, no notification).
-        // If echo reduction succeeds, re-transcribe the cleaned audio for better results.
+        // Auto-generate the summary in the background (silently, no
+        // notification) from the dual-channel live transcript, which
+        // `RecordingController.stop()` has already cleaned and persisted.
+        // NOTE: we deliberately do NOT re-transcribe the echo-reduced audio —
+        // that file is mono with the other party spectrally removed, so it
+        // would collapse both speakers into one and drop the "Others" side.
         guard !segments.isEmpty else { return }
 
         let modelId = env.activeSummarizationKind == OpenAIEngine.kind
@@ -222,49 +225,21 @@ struct RootView: View {
         let prompt = env.customSystemPrompt.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
             ? nil : env.customSystemPrompt
         let engine = env.summarizationEngine
-        let transcriptionEngine = env.activeTranscriptionEngine
         let store = env.meetingStore
         let summaryService = env.summaryService
-        let cleanedAudioURL = MeetingFolder(url: folderURL).cleanedAudioURL
 
-        Task {
-            var summarySegments = segments
-
-            // Wait for echo reduction, then re-transcribe cleaned audio.
-            if let echoTask {
-                let echoOK = await echoTask.value
-                if echoOK {
-                    print("[RootView] Echo reduction done, re-transcribing cleaned audio for summary...")
-                    do {
-                        let cleanedSegments = try await transcriptionEngine.transcribeFile(
-                            at: cleanedAudioURL,
-                            options: TranscriptionOptions()
-                        )
-                        if !cleanedSegments.isEmpty {
-                            summarySegments = cleanedSegments
-                            // Also update the stored transcript with the cleaner version.
-                            try? await store.replaceTranscript(cleanedSegments, for: meetingID)
-                            print("[RootView] Replaced transcript with \(cleanedSegments.count) cleaned segments")
-                        }
-                    } catch {
-                        print("[RootView] Re-transcription failed, using live segments: \(error)")
-                    }
-                }
-            }
-
-            summaryService.generate(
-                meetingID: meetingID,
-                meetingTitle: meeting.title,
-                segments: summarySegments,
-                meeting: meeting,
-                engine: engine,
-                modelId: modelId,
-                userNotes: userNotes,
-                customPrompt: prompt,
-                store: store,
-                silent: true
-            )
-        }
+        summaryService.generate(
+            meetingID: meetingID,
+            meetingTitle: meeting.title,
+            segments: segments,
+            meeting: meeting,
+            engine: engine,
+            modelId: modelId,
+            userNotes: userNotes,
+            customPrompt: prompt,
+            store: store,
+            silent: true
+        )
     }
 
     /// The folder a new meeting should be created inside, given the current

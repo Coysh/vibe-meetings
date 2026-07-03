@@ -179,12 +179,19 @@ public final class WhisperKitEngine: TranscriptionEngine, @unchecked Sendable {
         for options: TranscriptionOptions,
         isStreaming: Bool
     ) -> DecodingOptions {
+        // `suppressBlank` drops empty/near-blank decodes (a common source of
+        // hallucinated pleasantries on silence). For the live streaming path we
+        // also turn word timestamps OFF: nothing in the app reads `seg.words`,
+        // and the DTW alignment they require is pure latency on the medium model
+        // running two channels in parallel.
         DecodingOptions(
             verbose: false,
             task: options.translate ? .translate : .transcribe,
             language: options.language,
             temperature: options.temperature,
-            wordTimestamps: options.enableWordTimestamps
+            temperatureFallbackCount: isStreaming ? 3 : 5,
+            wordTimestamps: isStreaming ? false : options.enableWordTimestamps,
+            suppressBlank: true
         )
     }
 
@@ -218,7 +225,10 @@ public final class WhisperKitEngine: TranscriptionEngine, @unchecked Sendable {
                     end: TimeInterval(seg.end) + timeOffset,
                     text: cleaned,
                     isPartial: isPartial,
-                    confidence: nil,
+                    // WhisperKit's `avgLogprob` (a negative log-prob) — used
+                    // downstream to distinguish confident speech from silence
+                    // hallucinations. Not a 0…1 score.
+                    confidence: seg.avgLogprob,
                     words: words
                 ))
             }
