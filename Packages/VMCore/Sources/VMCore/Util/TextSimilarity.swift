@@ -33,6 +33,21 @@ public enum TextSimilarity {
         return Double(intersection) / Double(union)
     }
 
+    /// Directional containment: the fraction of `a`'s word tokens that also
+    /// appear in `b`, in 0…1. Answers "how much of `a` is covered by `b`".
+    ///
+    /// Unlike ``jaccard(_:_:)``, this is *not* penalized when `b` carries extra
+    /// words `a` lacks — so a *partial* copy (`a` dropped some words but added
+    /// none) still scores high. That is exactly the echo case: the mic channel
+    /// re-records the other party imperfectly, capturing a subset of their words.
+    /// Because it is directional, a genuine utterance whose own words are absent
+    /// from `b` stays low, so it does not falsely match.
+    public static func containment(_ a: String, _ b: String) -> Double {
+        let sa = Set(tokens(a)), sb = Set(tokens(b))
+        if sa.isEmpty { return 0 }
+        return Double(sa.intersection(sb).count) / Double(sa.count)
+    }
+
     /// True when `a` and `b` are near-duplicates: either the shorter is a
     /// leading token-prefix of the longer, or their word sets overlap by at
     /// least `threshold` (Jaccard).

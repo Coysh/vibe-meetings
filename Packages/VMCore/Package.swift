@@ -8,7 +8,8 @@ let package = Package(
         .library(name: "VMCore", targets: ["VMCore"])
     ],
     targets: [
-        .target(name: "VMCore")
+        .target(name: "VMCore"),
+        .testTarget(name: "VMCoreTests", dependencies: ["VMCore"])
     ],
     swiftLanguageModes: [.v6]
 )

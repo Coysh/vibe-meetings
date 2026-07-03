@@ -7,6 +7,9 @@ versioned with [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Fixed
+- Echo suppression now catches *partial* echo — when the other party's voice bleeds in at low level and the mic transcribes it imperfectly (dropping words), `EchoDedup` previously kept the garbled "You" copy because a symmetric word-overlap score fell below threshold. It now scores directional containment (how much of the mic text is covered by the clean system channel), so degraded echo is removed while genuine speech spoken over the other party is preserved
+
 ## [1.6.1] - 2026-07-03
 
 ### Fixed
