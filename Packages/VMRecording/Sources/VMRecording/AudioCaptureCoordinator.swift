@@ -123,6 +123,7 @@ public actor AudioCaptureCoordinator: AudioCaptureService {
 
         micPCMContinuation.finish()
         systemPCMContinuation.finish()
+        levelContinuation.finish()
         stateContinuation.yield(.idle)
 
         isRunning = false
