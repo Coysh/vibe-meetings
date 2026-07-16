@@ -110,6 +110,15 @@ private struct GeneralSettingsView: View {
                         .font(.caption)
                         .foregroundStyle(.secondary)
                 }
+
+                Toggle("Notify if microphone picks up no audio", isOn: Binding(
+                    get: { env.meetingEndDetector.micSilenceNotificationEnabled },
+                    set: { env.meetingEndDetector.micSilenceNotificationEnabled = $0 }
+                ))
+
+                Text("Sends a system notification if your mic appears dead (muted, wrong device, permission issue) even while the rest of the call is still audible.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
             }
 
             Section("Organizations") {

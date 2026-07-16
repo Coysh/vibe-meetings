@@ -7,6 +7,12 @@ versioned with [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Added
+- Notification when the microphone appears to be picking up no audio (muted, wrong input device, permission issue) during a recording, even while the rest of the call is still audible via system audio. Toggle in Settings → Auto-End Detection
+
+### Changed
+- Summary and action-item prompts now require a clear, single assignee per action item, defaulting to **You** (the meeting owner) instead of "Unassigned" when the transcript doesn't explicitly name someone
+
 ## [1.6.4] - 2026-07-03
 ### Fixed
 - Echo suppression now catches *partial* echo — when the other party's voice bleeds in at low level and the mic transcribes it imperfectly (dropping words), `EchoDedup` previously kept the garbled "You" copy because a symmetric word-overlap score fell below threshold. It now scores directional containment (how much of the mic text is covered by the clean system channel), so degraded echo is removed while genuine speech spoken over the other party is preserved

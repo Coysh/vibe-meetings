@@ -1,6 +1,7 @@
 import AppKit
 import Foundation
 import Observation
+import UserNotifications
 import VMCalendar
 import VMCore
 
@@ -42,11 +43,34 @@ final class MeetingEndDetector {
         didSet { UserDefaults.standard.set(appMonitoringEnabled, forKey: Self.appMonKey) }
     }
 
+    /// Whether to pop up a system notification if the microphone appears to be
+    /// picking up no audio at all (wrong input device, muted, permission issue, etc.).
+    var micSilenceNotificationEnabled: Bool {
+        didSet { UserDefaults.standard.set(micSilenceNotificationEnabled, forKey: Self.micNotifKey) }
+    }
+
+    /// Seconds of continuous mic silence before we warn the user the mic
+    /// doesn't seem to be picking anything up. Deliberately shorter than
+    /// `silenceThresholdSeconds` — this isn't "the meeting probably ended",
+    /// it's "your mic looks broken/muted right now".
+    var micSilenceWarningSeconds: TimeInterval {
+        didSet { UserDefaults.standard.set(micSilenceWarningSeconds, forKey: Self.micSilenceSecondsKey) }
+    }
+
     // MARK: - Internal state
 
     /// Timestamp when both channels went below the silence floor.
     /// Reset whenever either channel rises above the floor.
     private var silenceStartedAt: Date?
+
+    /// Timestamp when the mic channel alone went below the silence floor.
+    /// Tracked independently of `silenceStartedAt` so a dead mic gets flagged
+    /// even while system audio (other participants) is still coming through.
+    private var micSilenceStartedAt: Date?
+
+    /// Whether we've already warned about mic silence this recording session.
+    /// Reset on `recordingDidStart`/`recordingDidStop` so we don't spam notifications.
+    private var micSilenceNotified = false
 
     /// Whether the meeting app was detected as running when recording started.
     /// We only trigger app-exit detection if the app was running at start.
@@ -74,6 +98,8 @@ final class MeetingEndDetector {
     private static let silenceKey = "VibeMeetings.AutoEndDetection.SilenceSeconds"
     private static let floorKey = "VibeMeetings.AutoEndDetection.SilenceFloorDBFS"
     private static let appMonKey = "VibeMeetings.AutoEndDetection.AppMonitoring"
+    private static let micNotifKey = "VibeMeetings.AutoEndDetection.MicSilenceNotification"
+    private static let micSilenceSecondsKey = "VibeMeetings.AutoEndDetection.MicSilenceSeconds"
 
     private var dismissed = false
     private var monitorTask: Task<Void, Never>?
@@ -84,6 +110,8 @@ final class MeetingEndDetector {
         self.silenceThresholdSeconds = defaults.object(forKey: Self.silenceKey) as? TimeInterval ?? 120
         self.silenceFloorDBFS = Float(defaults.object(forKey: Self.floorKey) as? Double ?? -50.0)
         self.appMonitoringEnabled = defaults.object(forKey: Self.appMonKey) as? Bool ?? true
+        self.micSilenceNotificationEnabled = defaults.object(forKey: Self.micNotifKey) as? Bool ?? true
+        self.micSilenceWarningSeconds = defaults.object(forKey: Self.micSilenceSecondsKey) as? TimeInterval ?? 30
     }
 
     // MARK: - Lifecycle
@@ -93,6 +121,8 @@ final class MeetingEndDetector {
         shouldSuggestEnd = false
         endReason = ""
         silenceStartedAt = nil
+        micSilenceStartedAt = nil
+        micSilenceNotified = false
         dismissed = false
 
         // Snapshot: is a meeting app currently running?
@@ -113,6 +143,8 @@ final class MeetingEndDetector {
         shouldSuggestEnd = false
         endReason = ""
         silenceStartedAt = nil
+        micSilenceStartedAt = nil
+        micSilenceNotified = false
         dismissed = false
         meetingAppWasRunning = false
         monitorTask?.cancel()
@@ -131,6 +163,8 @@ final class MeetingEndDetector {
     /// Called frequently with the latest audio level snapshot.
     /// Tracks how long both channels have been below the silence floor.
     func updateLevels(mic: Float, system: Float) {
+        checkMicSilence(mic: mic)
+
         guard autoEndEnabled, !dismissed else { return }
 
         let bothSilent = mic < silenceFloorDBFS && system < silenceFloorDBFS
@@ -148,6 +182,44 @@ final class MeetingEndDetector {
             // Audio resumed — reset silence timer.
             silenceStartedAt = nil
         }
+    }
+
+    /// Tracks mic-only silence (independent of system audio) and pops a system
+    /// notification once if the mic looks dead for `micSilenceWarningSeconds` —
+    /// this catches a muted/wrong-device mic even while the rest of the call
+    /// is audible via system audio, which `updateLevels`'s combined check would miss.
+    private func checkMicSilence(mic: Float) {
+        guard micSilenceNotificationEnabled, !micSilenceNotified else { return }
+
+        if mic < silenceFloorDBFS {
+            if micSilenceStartedAt == nil {
+                micSilenceStartedAt = Date()
+            }
+            if Date().timeIntervalSince(micSilenceStartedAt!) >= micSilenceWarningSeconds {
+                micSilenceNotified = true
+                Task { await self.postMicSilenceNotification() }
+            }
+        } else {
+            micSilenceStartedAt = nil
+        }
+    }
+
+    private func postMicSilenceNotification() async {
+        let center = UNUserNotificationCenter.current()
+        let granted = (try? await center.requestAuthorization(options: [.alert, .sound])) ?? false
+        guard granted else { return }
+
+        let content = UNMutableNotificationContent()
+        content.title = "No Microphone Input"
+        content.body = "Your microphone doesn't seem to be picking up any audio. Check it isn't muted or that the right input device is selected."
+        content.sound = .default
+
+        let request = UNNotificationRequest(
+            identifier: "mic-silence-\(UUID().uuidString)",
+            content: content,
+            trigger: nil // deliver immediately
+        )
+        try? await center.add(request)
     }
 
     // MARK: - Signal: Calendar end time
