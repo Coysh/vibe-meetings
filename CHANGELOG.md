@@ -7,11 +7,14 @@ versioned with [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [1.6.5] - 2026-07-16
 ### Added
 - Notification when the microphone appears to be picking up no audio (muted, wrong input device, permission issue) during a recording, even while the rest of the call is still audible via system audio. Toggle in Settings → Auto-End Detection
 
 ### Changed
 - Summary and action-item prompts now require a clear, single assignee per action item, defaulting to **You** (the meeting owner) instead of "Unassigned" when the transcript doesn't explicitly name someone
+
+
 
 ## [1.6.4] - 2026-07-03
 ### Fixed
@@ -136,7 +139,8 @@ versioned with [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - Microphone device selection in Settings
 - Resume recording for existing meetings
 
-[Unreleased]: https://github.com/Coysh/vibe-meetings/compare/v1.6.4...HEAD
+[Unreleased]: https://github.com/Coysh/vibe-meetings/compare/v1.6.5...HEAD
+[1.6.5]: https://github.com/Coysh/vibe-meetings/compare/v1.5.3...v1.6.5
 [1.6.4]: https://github.com/Coysh/vibe-meetings/compare/v1.5.0...v1.6.4
 [1.5.3]: https://github.com/Coysh/vibe-meetings/compare/v1.3.0...v1.5.3
 [1.5.0]: https://github.com/Coysh/vibe-meetings/compare/v1.3.0...v1.5.0
