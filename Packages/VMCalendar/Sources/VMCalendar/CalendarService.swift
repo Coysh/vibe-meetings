@@ -141,7 +141,9 @@ public actor EventKitCalendarService: CalendarService {
             end: now.addingTimeInterval(window),
             calendars: calendars
         )
-        let ek = store.events(matching: predicate)
+        // All-day events (birthdays, holidays, time-blocks) aren't calls —
+        // exclude them here so every downstream consumer ignores them.
+        let ek = store.events(matching: predicate).filter { !$0.isAllDay }
         return ek
             .sorted { $0.startDate < $1.startDate }
             .map(CalendarEvent.init(from:))

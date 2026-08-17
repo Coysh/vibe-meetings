@@ -6,6 +6,11 @@ Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 versioned with [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
+### Changed
+- All-day calendar events are now ignored by call detection — they no longer shadow real meetings, trigger suggestion banners, or schedule pre-meeting reminders
+- The "meeting detected" notification now stays in Notification Center for the duration of the call and is cleared automatically when recording starts, the call ends, or the suggestion is dismissed
+- Dismissing the record suggestion now silences it for the rest of that call only — the next call gets a fresh banner and notification (previously a dismissal could suppress all future calls until a recording was made)
+- The system notification is now posted even when the in-app suggestion banner is visible, so a hidden app window no longer means a missed reminder
 
 ## [1.6.5] - 2026-07-16
 ### Added

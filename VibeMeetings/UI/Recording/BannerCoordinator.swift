@@ -61,6 +61,7 @@ final class BannerCoordinator {
 
     /// Notification category and action identifiers.
     nonisolated static let meetingDetectedCategory = "MEETING_DETECTED"
+    nonisolated static let meetingDetectedIdentifier = "meeting-detected"
     nonisolated static let startRecordingAction = "START_RECORDING"
 
     /// Pre-meeting reminder category and actions.
@@ -145,7 +146,9 @@ final class BannerCoordinator {
     func dismissMicSuggestion() {
         micActiveSuggestion = false
         micDismissed = true
-        notificationPosted = false
+        // Leave `notificationPosted` true — dismissing silences the reminder
+        // for the rest of this call; it resets when the call ends.
+        removeMeetingDetectedNotification()
     }
 
     func dismissMeetingEnd() {
@@ -160,6 +163,8 @@ final class BannerCoordinator {
         micDismissed = false
         meetingEndSuggestion = false
         notificationPosted = false
+        // Recording is underway — the reminder has served its purpose.
+        removeMeetingDetectedNotification()
     }
 
     /// Called when a recording stops — resets per-session state.
@@ -258,6 +263,11 @@ final class BannerCoordinator {
                 micActiveSuggestion = false
                 micEventTitle = nil
                 micActiveAppName = nil
+                // Call ended — clear the sticky reminder and reset per-call
+                // state so the next call gets a fresh banner + notification.
+                micDismissed = false
+                notificationPosted = false
+                removeMeetingDetectedNotification()
             }
         }
     }
@@ -269,17 +279,20 @@ final class BannerCoordinator {
     /// 2. A meeting app is running AND the microphone is actively in use
     ///    (catches impromptu calls with no calendar event).
     private func pollMeetingAppActivity() async {
-        guard !isRecordingProvider(), !micDismissed else { return }
-
-        // Already showing a calendar-based suggestion or mic banner — skip.
-        if currentSuggestion != nil || micActiveSuggestion { return }
+        guard !isRecordingProvider() else { return }
 
         // Check if a meeting app is running.
         guard let appName = runningMeetingAppName() else {
-            // Meeting app stopped — allow a fresh notification next time.
+            // Call ended — clear the sticky reminder and reset per-call state
+            // so the next call gets a fresh banner + notification.
+            micDismissed = false
             notificationPosted = false
+            removeMeetingDetectedNotification()
             return
         }
+
+        // User dismissed the suggestion — stay silent for the rest of this call.
+        guard !micDismissed else { return }
 
         // Check for a calendar event in progress or about to start.
         let ev: CalendarEvent?
@@ -300,16 +313,20 @@ final class BannerCoordinator {
             return
         }
 
-        // A meeting app is running with call evidence — show the mic banner.
-        micActiveAppName = appName
-        micEventTitle = ev?.title
-        micActiveSuggestion = true
-
-        // Also post a system notification so the user sees it even if the app window is hidden.
+        // Post a system notification even if an in-app banner is already
+        // visible — the app window may be hidden during the call.
         if !notificationPosted {
             notificationPosted = true
             await postMeetingDetectedNotification(eventTitle: ev?.title, appName: appName)
         }
+
+        // Already showing a calendar-based suggestion or mic banner — leave it.
+        if currentSuggestion != nil || micActiveSuggestion { return }
+
+        // A meeting app is running with call evidence — show the mic banner.
+        micActiveAppName = appName
+        micEventTitle = ev?.title
+        micActiveSuggestion = true
     }
 
     // MARK: - Pre-meeting reminders
@@ -431,11 +448,19 @@ final class BannerCoordinator {
         content.categoryIdentifier = Self.meetingDetectedCategory
 
         let request = UNNotificationRequest(
-            identifier: "meeting-detected",
+            identifier: Self.meetingDetectedIdentifier,
             content: content,
             trigger: nil
         )
         try? await center.add(request)
+    }
+
+    /// Clear the sticky "meeting detected" notification from Notification
+    /// Center — called once recording starts, the call ends, or the user
+    /// dismisses the suggestion.
+    private func removeMeetingDetectedNotification() {
+        UNUserNotificationCenter.current()
+            .removeDeliveredNotifications(withIdentifiers: [Self.meetingDetectedIdentifier])
     }
 
     // MARK: - Meeting end detection
