@@ -6,8 +6,11 @@ Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 versioned with [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
-### Fixed
+
+## [1.7.2] - 2026-10-01
 - 1.7.0 could freeze on launch (100% CPU) because of an endless update loop between the menu bar icon and its "Show in menu bar" setting
+
+### Fixed
 
 ## [1.7.0] - 2026-10-01
 
@@ -173,7 +176,8 @@ versioned with [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - Microphone device selection in Settings
 - Resume recording for existing meetings
 
-[Unreleased]: https://github.com/Coysh/vibe-meetings/compare/v1.7.0...HEAD
+[Unreleased]: https://github.com/Coysh/vibe-meetings/compare/v1.7.2...HEAD
+[1.7.2]: https://github.com/Coysh/vibe-meetings/compare/v1.6.6...v1.7.2
 [1.7.0]: https://github.com/Coysh/vibe-meetings/compare/v1.6.5...v1.7.0
 [1.6.6]: https://github.com/Coysh/vibe-meetings/compare/v1.6.4...v1.6.6
 [1.6.5]: https://github.com/Coysh/vibe-meetings/compare/v1.5.3...v1.6.5
