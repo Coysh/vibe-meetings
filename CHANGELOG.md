@@ -6,6 +6,8 @@ Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 versioned with [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
+### Fixed
+- 1.7.0 could freeze on launch (100% CPU) because of an endless update loop between the menu bar icon and its "Show in menu bar" setting
 
 ## [1.7.0] - 2026-10-01
 

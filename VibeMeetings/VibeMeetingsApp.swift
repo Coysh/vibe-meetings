@@ -49,7 +49,12 @@ struct VibeMeetingsApp: App {
             }
         }
 
-        MenuBarExtra(isInserted: $showMenuBar) {
+        // Read-only binding: SwiftUI writes the status item's visibility back
+        // through `isInserted` whenever AppKit/the system touches it. Feeding
+        // that into @AppStorage re-invalidates the scene graph, which updates
+        // the status item again — an endless main-thread loop (1.7.0 froze on
+        // launch). The Settings toggle is the only writer.
+        MenuBarExtra(isInserted: Binding(get: { showMenuBar }, set: { _ in })) {
             if let env = appEnv {
                 MenuBarContentView()
                     .environment(env)
