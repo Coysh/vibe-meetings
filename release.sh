@@ -307,7 +307,7 @@ if [ "$CURRENT_BRANCH" != "main" ]; then
     git merge "$CURRENT_BRANCH" --ff-only || git merge "$CURRENT_BRANCH" --no-edit
     git checkout "$CURRENT_BRANCH"
 fi
-git tag -f "$TAG"
+git tag -f -m "VibeMeetings $TAG" "$TAG"
 echo "==> Pushing main and tag..."
 git push origin main --quiet
 git push origin HEAD --quiet
