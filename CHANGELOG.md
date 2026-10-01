@@ -6,7 +6,9 @@ Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 versioned with [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
-### Added
+
+## [1.7.0] - 2026-10-01
+
 - Escalating "you're in a call and not recording" reminders: immediately, again after 2 and 5 minutes, then every 5 minutes until you record, snooze or choose "Not a meeting". Only one reminder is ever shown in Notification Center. Toggle in Settings → Notifications
 - **Record** on the call reminder starts recording instantly in the background, linked to the matching calendar event (or titled e.g. "Zoom call 14:05"). Also **Snooze 10 min** and **Not a meeting**; clicking the notification opens the start sheet
 - Floating recording indicator: a small draggable pill on every Space (including over full-screen calls). It shows "Not recording · Record" during a call, and a timer with Stop while recording
@@ -27,6 +29,7 @@ versioned with [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - Closing the main window no longer stops call detection; the app keeps running in the menu bar / Dock
 - The in-app "call detected" and calendar banners start recording immediately instead of opening the start sheet
 - Meetings recorded from Zoom, Google Meet or Webex events store that platform. Versions 1.6.6 and earlier can't read these meetings, so update every Mac that shares the meetings folder
+### Added
 
 ## [1.6.6] - 2026-08-17
 - All-day calendar events are now ignored by call detection — they no longer shadow real meetings, trigger suggestion banners, or schedule pre-meeting reminders
@@ -168,7 +171,8 @@ versioned with [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - Microphone device selection in Settings
 - Resume recording for existing meetings
 
-[Unreleased]: https://github.com/Coysh/vibe-meetings/compare/v1.6.6...HEAD
+[Unreleased]: https://github.com/Coysh/vibe-meetings/compare/v1.7.0...HEAD
+[1.7.0]: https://github.com/Coysh/vibe-meetings/compare/v1.6.5...v1.7.0
 [1.6.6]: https://github.com/Coysh/vibe-meetings/compare/v1.6.4...v1.6.6
 [1.6.5]: https://github.com/Coysh/vibe-meetings/compare/v1.5.3...v1.6.5
 [1.6.4]: https://github.com/Coysh/vibe-meetings/compare/v1.5.0...v1.6.4
