@@ -423,10 +423,7 @@ struct MeetingDetailView: View {
 
     private func resumeRecording() async {
         guard let handle else { return }
-        let controller = RecordingController(env: env)
-        env.activeRecordingController = controller
-        env.bannerCoordinator.recordingDidStart()
-        await controller.resume(handle: handle)
+        await env.recordingService.resume(handle: handle)
     }
 
     private func load() async {

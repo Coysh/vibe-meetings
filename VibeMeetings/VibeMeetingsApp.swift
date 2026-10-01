@@ -5,31 +5,15 @@ import UserNotifications
 struct VibeMeetingsApp: App {
     @NSApplicationDelegateAdaptor private var appDelegate: AppDelegate
 
-    @State private var appEnv: AppEnvironment? = {
-        do { return try AppEnvironment() }
-        catch {
-            print("Failed to bootstrap AppEnvironment: \(error)")
-            return nil
-        }
-    }()
+    @State private var appEnv: AppEnvironment? = AppContainer.env
+    @AppStorage(AppEnvironment.menuBarEnabledKey) private var showMenuBar = true
 
     var body: some Scene {
-        WindowGroup("vibe-meetings") {
+        WindowGroup("vibe-meetings", id: MainWindowPresenter.windowID) {
             Group {
                 if let env = appEnv {
                     RootView()
                         .environment(env)
-                        .onChange(of: env.activeRecordingController != nil) { _, isRecording in
-                            if isRecording {
-                                DockIconManager.showRecordingBadge()
-                            } else {
-                                DockIconManager.clearRecordingBadge()
-                            }
-                        }
-                        .onAppear {
-                            BannerCoordinator.registerNotificationCategory()
-                            UNUserNotificationCenter.current().delegate = appDelegate
-                        }
                 } else {
                     Text("Failed to start. See log.")
                         .frame(minWidth: 600, minHeight: 400)
@@ -41,7 +25,8 @@ struct VibeMeetingsApp: App {
         .commands {
             CommandGroup(replacing: .newItem) {
                 Button("New Meeting…") {
-                    NotificationCenter.default.post(name: .newMeetingRequested, object: nil)
+                    appEnv?.appRouter.requestNewMeeting()
+                    appEnv?.presenter.show()
                 }
                 .keyboardShortcut("n")
             }
@@ -63,59 +48,80 @@ struct VibeMeetingsApp: App {
                     .environment(env)
             }
         }
+
+        MenuBarExtra(isInserted: $showMenuBar) {
+            if let env = appEnv {
+                MenuBarContentView()
+                    .environment(env)
+            }
+        } label: {
+            if let env = appEnv {
+                MenuBarLabel()
+                    .environment(env)
+            } else {
+                Image(systemName: "waveform")
+            }
+        }
+        .menuBarExtraStyle(.menu)
     }
 }
 
-/// Handles notification actions (e.g., "Start Recording" from the meeting detection notification).
+/// Installs the notification delegate before launch finishes (so a
+/// notification click that launches the app isn't dropped) and starts the
+/// app-wide services independently of any window.
 final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCenterDelegate {
-    /// Called when the user taps a notification action while the app is in the foreground.
-    func userNotificationCenter(
+    func applicationWillFinishLaunching(_ notification: Notification) {
+        UNUserNotificationCenter.current().delegate = self
+        NotificationManager.registerCategories()
+    }
+
+    func applicationDidFinishLaunching(_ notification: Notification) {
+        guard let env = AppContainer.env else { return }
+        env.bootstrap()
+        NotificationActionRouter.shared.attach(env)
+    }
+
+    /// Keep running (call detection, reminders, menu bar) with no windows open.
+    func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool {
+        false
+    }
+
+    /// Clicking the Dock icon with no windows reopens the main window.
+    func applicationShouldHandleReopen(_ sender: NSApplication, hasVisibleWindows flag: Bool) -> Bool {
+        true
+    }
+
+    /// Notification button or body clicked.
+    nonisolated func userNotificationCenter(
         _ center: UNUserNotificationCenter,
         didReceive response: UNNotificationResponse
     ) async {
+        // Copy what we need before hopping actors — the response isn't Sendable.
         let action = response.actionIdentifier
-        let userInfo = response.notification.request.content.userInfo
-
-        if action == BannerCoordinator.startRecordingAction
-            || action == BannerCoordinator.startListeningAction {
-            // Bring app to front and trigger the new meeting flow.
-            await MainActor.run {
-                NSApp.activate(ignoringOtherApps: true)
-                NotificationCenter.default.post(name: .newMeetingRequested, object: nil)
-            }
-        } else if action == BannerCoordinator.joinAndRecordAction {
-            // Open the Teams URL, then start recording.
-            if let urlString = userInfo["teamsURL"] as? String,
-               let url = URL(string: urlString) {
-                await MainActor.run {
-                    _ = NSWorkspace.shared.open(url)
-                }
-                // Small delay to let Teams launch before showing the recording sheet.
-                try? await Task.sleep(for: .milliseconds(1500))
-            }
-            await MainActor.run {
-                NSApp.activate(ignoringOtherApps: true)
-                NotificationCenter.default.post(name: .newMeetingRequested, object: nil)
-            }
-        } else if action == UNNotificationDefaultActionIdentifier {
-            // User tapped the notification body itself — bring app to front.
-            await MainActor.run {
-                NSApp.activate(ignoringOtherApps: true)
-            }
+        let content = response.notification.request.content
+        let category = content.categoryIdentifier
+        var userInfo: [String: String] = [:]
+        for (key, value) in content.userInfo {
+            if let key = key as? String, let value = value as? String { userInfo[key] = value }
+        }
+        await MainActor.run {
+            NotificationActionRouter.shared.handle(action: action, category: category, userInfo: userInfo)
         }
     }
 
-    /// Show notifications even when app is in the foreground (so the banner and notification both work).
-    func userNotificationCenter(
+    /// Show notifications while the app is in the foreground too — except
+    /// "please record" nags once a recording is already running.
+    nonisolated func userNotificationCenter(
         _ center: UNUserNotificationCenter,
         willPresent notification: UNNotification
     ) async -> UNNotificationPresentationOptions {
-        [.banner, .sound]
+        let category = notification.request.content.categoryIdentifier
+        let recording = await MainActor.run { AppContainer.env?.recordingService.isBusy ?? false }
+        if recording && NotificationManager.Category.recordingNags.contains(category) {
+            return []
+        }
+        return [.banner, .list, .sound]
     }
-}
-
-extension Notification.Name {
-    static let newMeetingRequested = Notification.Name("VibeMeetings.NewMeetingRequested")
 }
 
 /// Opens a standalone About window (replacing the default macOS About panel).

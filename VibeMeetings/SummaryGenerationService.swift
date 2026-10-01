@@ -1,6 +1,5 @@
 import Foundation
 import Observation
-import UserNotifications
 import VMCore
 import VMSummarization
 
@@ -51,6 +50,9 @@ final class SummaryGenerationService {
     /// When set to `false`, suppresses the "Summary Ready" system notification.
     /// Defaults to `true`; bound to `AppEnvironment.notifySummaryReady`.
     var notificationsEnabled: Bool = true
+
+    /// Posts the "Summary Ready" notification. Set by `AppEnvironment`.
+    var notifications: NotificationManager?
 
     /// Returns the in-flight or most-recently-completed job for a meeting, if any.
     func job(for meetingID: UUID) -> SummaryJob? {
@@ -107,7 +109,7 @@ final class SummaryGenerationService {
 
                 // Post a local notification unless silent (auto-generated) or disabled in settings.
                 if !silent, self?.notificationsEnabled == true {
-                    await self?.postCompletionNotification(title: meetingTitle)
+                    await self?.notifications?.postSummaryReady(meetingID: meetingID, title: meetingTitle)
                 }
             } catch {
                 if !Task.isCancelled {
@@ -123,26 +125,5 @@ final class SummaryGenerationService {
         tasks[meetingID]?.cancel()
         tasks.removeValue(forKey: meetingID)
         jobs.removeValue(forKey: meetingID)
-    }
-
-    // MARK: - Notifications
-
-    private func postCompletionNotification(title: String) async {
-        let center = UNUserNotificationCenter.current()
-        // Request permission if not already granted (no-op if already allowed).
-        let granted = (try? await center.requestAuthorization(options: [.alert, .sound])) ?? false
-        guard granted else { return }
-
-        let content = UNMutableNotificationContent()
-        content.title = "Summary Ready"
-        content.body = "Summary for \"\(title)\" is complete."
-        content.sound = .default
-
-        let request = UNNotificationRequest(
-            identifier: "summary-\(UUID().uuidString)",
-            content: content,
-            trigger: nil // deliver immediately
-        )
-        try? await center.add(request)
     }
 }

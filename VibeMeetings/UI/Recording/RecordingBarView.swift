@@ -260,11 +260,9 @@ final class RecordingController {
             }
         }
 
-        // NOTE: The caller (RootView) is responsible for clearing
-        // env.activeRecordingController and showing the post-recording sheet.
-        // This allows the caller to read meetingHandle before it's lost.
-        env.bannerCoordinator.recordingDidStop()
-        env.meetingEndDetector.recordingDidStop()
+        // NOTE: The caller (RecordingSessionService) is responsible for
+        // clearing the controller, resetting detection state and showing the
+        // post-recording sheet. This lets it read meetingHandle before it's lost.
         return result
     }
 }
@@ -272,7 +270,6 @@ final class RecordingController {
 struct RecordingBarView: View {
     @Bindable var controller: RecordingController
     @Environment(AppEnvironment.self) private var env
-    var onStopped: (() -> Void)?
     var onNavigateToMeeting: (() -> Void)?
     @State private var showNotes = false
 
@@ -320,10 +317,7 @@ struct RecordingBarView: View {
                     .help("Meeting notes")
 
                     Button("Stop") {
-                        Task {
-                            _ = await controller.stop()
-                            onStopped?()
-                        }
+                        Task { await env.recordingService.stop() }
                     }
                     .buttonStyle(.borderedProminent)
                     .tint(.red)

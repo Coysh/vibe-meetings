@@ -82,7 +82,7 @@ struct FolderTreeView: View {
         .toolbar {
             ToolbarItem(placement: .primaryAction) {
                 Button {
-                    NotificationCenter.default.post(name: .newMeetingRequested, object: nil)
+                    env.appRouter.requestNewMeeting()
                 } label: {
                     Label("New Recording", systemImage: "record.circle")
                 }
@@ -397,14 +397,7 @@ struct FolderTreeView: View {
                 VStack(alignment: .leading, spacing: 1) {
                     HStack(spacing: 4) {
                         Text(event.title).lineLimit(1).font(.callout)
-                        if event.hasTeamsURL {
-                            Text("Teams")
-                                .font(.caption2.bold())
-                                .padding(.horizontal, 5)
-                                .padding(.vertical, 1)
-                                .background(Color.purple.opacity(0.2), in: Capsule())
-                                .foregroundStyle(.purple)
-                        }
+                        PlatformBadge(event: event)
                     }
                     Text(event.startDate, format: .dateTime.hour().minute())
                         .font(.caption2)
@@ -413,7 +406,7 @@ struct FolderTreeView: View {
                 Spacer()
             }
             HStack(spacing: 6) {
-                if event.hasTeamsURL {
+                if event.hasMeetingLink {
                     Button {
                         joinAndRecord(event: event)
                     } label: {
@@ -421,7 +414,7 @@ struct FolderTreeView: View {
                             .font(.caption)
                     }
                     .buttonStyle(.borderedProminent)
-                    .tint(.purple)
+                    .tint(event.platform.tint)
                     .controlSize(.small)
                 }
                 Button {
@@ -438,26 +431,11 @@ struct FolderTreeView: View {
     }
 
     private func joinAndRecord(event: CalendarEvent) {
-        if let url = event.teamsJoinURL {
-            NSWorkspace.shared.open(url)
-        }
-        // Brief delay so Teams can launch, then trigger recording.
-        Task {
-            try? await Task.sleep(for: .seconds(1.5))
-            NotificationCenter.default.post(
-                name: .newMeetingRequested,
-                object: nil,
-                userInfo: ["preselectedEventID": event.id]
-            )
-        }
+        Task { await env.recordingService.joinAndRecord(event: event) }
     }
 
     private func startRecording(event: CalendarEvent) {
-        NotificationCenter.default.post(
-            name: .newMeetingRequested,
-            object: nil,
-            userInfo: ["preselectedEventID": event.id]
-        )
+        env.appRouter.requestNewMeeting(preselectEventID: event.id)
     }
 
     // MARK: - Date grouping

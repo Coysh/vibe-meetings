@@ -13,13 +13,17 @@ public struct CalendarEvent: Sendable, Hashable, Identifiable {
     public let endDate: Date
     public let location: String?
     public let notes: String?
-    public let teamsJoinURL: URL?
+    /// Online-meeting join link (Teams, Zoom, Meet, Webex), if the invite has one.
+    public let meetingLink: MeetingLink?
     public let calendarID: String
     public let calendarTitle: String
     public let attendeeNames: [String]
 
+    public var hasMeetingLink: Bool { meetingLink != nil }
+    public var platform: MeetingPlatform { meetingLink?.platform ?? .other }
+
+    public var teamsJoinURL: URL? { meetingLink?.platform == .teams ? meetingLink?.url : nil }
     public var hasTeamsURL: Bool { teamsJoinURL != nil }
-    public var platform: MeetingPlatform { hasTeamsURL ? .teams : .other }
 
     public init(
         id: String,
@@ -29,7 +33,8 @@ public struct CalendarEvent: Sendable, Hashable, Identifiable {
         endDate: Date,
         location: String?,
         notes: String?,
-        teamsJoinURL: URL?,
+        teamsJoinURL: URL? = nil,
+        meetingLink: MeetingLink? = nil,
         calendarID: String,
         calendarTitle: String,
         attendeeNames: [String] = []
@@ -41,7 +46,7 @@ public struct CalendarEvent: Sendable, Hashable, Identifiable {
         self.endDate = endDate
         self.location = location
         self.notes = notes
-        self.teamsJoinURL = teamsJoinURL
+        self.meetingLink = meetingLink ?? teamsJoinURL.map { MeetingLink(url: $0, platform: .teams) }
         self.calendarID = calendarID
         self.calendarTitle = calendarTitle
         self.attendeeNames = attendeeNames
@@ -50,7 +55,7 @@ public struct CalendarEvent: Sendable, Hashable, Identifiable {
 
 extension CalendarEvent {
     init(from ekEvent: EKEvent) {
-        let teamsURL = TeamsURLDetector.detect(in: ekEvent)
+        let link = MeetingURLDetector.detect(in: ekEvent)
         let externalID = ekEvent.calendarItemExternalIdentifier ?? ""
         let resolvedSeriesID = externalID.isEmpty
             ? CalendarEvent.fallbackSeriesID(for: ekEvent)
@@ -75,7 +80,7 @@ extension CalendarEvent {
             endDate: ekEvent.endDate,
             location: ekEvent.location?.nilIfEmpty,
             notes: ekEvent.notes?.nilIfEmpty,
-            teamsJoinURL: teamsURL,
+            meetingLink: link,
             calendarID: ekEvent.calendar.calendarIdentifier,
             calendarTitle: ekEvent.calendar.title,
             attendeeNames: names

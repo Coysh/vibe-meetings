@@ -541,7 +541,9 @@ private struct EngineSettingsView: View {
 
 private struct NotificationSettingsView: View {
     @Environment(AppEnvironment.self) private var env
+    @AppStorage(AppEnvironment.menuBarEnabledKey) private var showMenuBar = true
     @State private var authorizationStatus: UNAuthorizationStatus = .notDetermined
+    @State private var alertStyle: UNAlertStyle = .alert
 
     var body: some View {
         @Bindable var env = env
@@ -553,15 +555,12 @@ private struct NotificationSettingsView: View {
                         .foregroundStyle(.orange)
 
                     Button("Open Notification Settings") {
-                        if let url = URL(string: "x-apple.systempreferences:com.apple.Notifications-Settings") {
-                            NSWorkspace.shared.open(url)
-                        }
+                        NotificationManager.openSystemNotificationSettings()
                     }
                 } else if authorizationStatus == .notDetermined {
                     Button("Enable Notifications") {
                         Task {
-                            let center = UNUserNotificationCenter.current()
-                            _ = try? await center.requestAuthorization(options: [.alert, .sound, .badge])
+                            await env.notifications.ensureAuthorized()
                             await refreshAuthStatus()
                         }
                     }
@@ -574,17 +573,42 @@ private struct NotificationSettingsView: View {
                     Label("Notifications are enabled", systemImage: "checkmark.circle.fill")
                         .font(.caption)
                         .foregroundStyle(.green)
+
+                    if alertStyle != .alert {
+                        Label("Reminders disappear after a few seconds. In System Settings → Notifications → vibe-meetings, set the alert style to **Persistent** (Alerts) so a \"not recording\" reminder stays on screen until you act on it.", systemImage: "exclamationmark.triangle.fill")
+                            .font(.caption)
+                            .foregroundStyle(.orange)
+                        Button("Open Notification Settings") {
+                            NotificationManager.openSystemNotificationSettings()
+                        }
+                    }
                 }
+                Text("If you use a Focus mode during meetings, add vibe-meetings to its allowed apps so reminders get through.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
             } header: {
                 Text("Permission")
             }
 
             Section {
-                Toggle("Meeting / call detected", isOn: $env.notifyMeetingDetected)
-                Text("Alert when a meeting app and microphone are active together, or a calendar event is starting.")
+                Toggle("Remind me when I'm in a call that isn't being recorded", isOn: $env.notifyMeetingDetected)
+                if env.notifyMeetingDetected {
+                    Toggle("Keep reminding until I record or dismiss", isOn: $env.notifyEscalatingReminders)
+                    Text(env.notifyEscalatingReminders
+                         ? "Reminds you straight away, again after 2 and 5 minutes, then every 5 minutes. Use Snooze or “Not a meeting” on the notification to quiet it."
+                         : "Sends a single reminder per call.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+                Toggle("Detect calls in web browsers (Google Meet, Teams on the web…)", isOn: $env.detectBrowserCalls)
+                Text("Calls are detected from whichever app is using a microphone, on any input device. The notification’s **Record** button starts recording immediately.")
                     .font(.caption)
                     .foregroundStyle(.secondary)
+            } header: {
+                Text("Unrecorded Call Reminders")
+            }
 
+            Section {
                 Toggle("Pre-meeting reminder", isOn: $env.notifyPreMeetingReminder)
 
                 if env.notifyPreMeetingReminder {
@@ -596,59 +620,70 @@ private struct NotificationSettingsView: View {
                     }
                 }
 
-                Text("Sends a reminder before calendar events with an option to start recording.")
+                Toggle("Also remind me when online meetings start", isOn: $env.notifyAtEventStart)
+
+                Text("Calendar reminders offer **Record** and, for Teams, Zoom, Meet and Webex links, **Join & Record**. They follow the event if it moves and are skipped once you're recording.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            } header: {
+                Text("Calendar Reminders")
+            }
+
+            Section {
+                Toggle("Show floating indicator", isOn: $env.showRecordingOverlay)
+                if env.showRecordingOverlay {
+                    Button("Reset Indicator Position") {
+                        RecordingOverlayController.resetPosition()
+                    }
+                }
+                Text("A small pill that floats above other apps: “Not recording · Record” during a call, and a timer with Stop while recording. Drag it anywhere.")
                     .font(.caption)
                     .foregroundStyle(.secondary)
 
+                Toggle("Show in menu bar", isOn: $showMenuBar)
+            } header: {
+                Text("Recording Indicator")
+            }
+
+            Section {
                 Toggle("Summary ready", isOn: $env.notifySummaryReady)
                 Text("Alert when an AI summary finishes generating.")
                     .font(.caption)
                     .foregroundStyle(.secondary)
             } header: {
-                Text("Notification Types")
+                Text("Other")
             }
 
             Section {
-                Button("Send Test Notification") {
-                    Task { await sendTestNotification() }
+                HStack {
+                    Button("Send Test Notification") {
+                        Task { await env.notifications.postTestNotification() }
+                    }
+                    Button("Send Test Call Reminder") {
+                        Task { await env.notifications.postTestCallReminder() }
+                    }
                 }
-                .disabled(authorizationStatus != .authorized)
+                .disabled(authorizationStatus != .authorized && authorizationStatus != .provisional)
 
-                Text("Sends a sample notification so you can verify your system notification settings are working.")
+                Text("The test call reminder has the real Record / Snooze / Not a meeting buttons — pressing Record starts a real recording.")
                     .font(.caption)
                     .foregroundStyle(.secondary)
             } header: {
                 Text("Test")
             }
         }
-        .padding()
+        .formStyle(.grouped)
         .task { await refreshAuthStatus() }
+        // The user often comes back from System Settings after changing the style.
+        .onReceive(NotificationCenter.default.publisher(for: NSApplication.didBecomeActiveNotification)) { _ in
+            Task { await refreshAuthStatus() }
+        }
     }
 
     private func refreshAuthStatus() async {
-        let settings = await UNUserNotificationCenter.current().notificationSettings()
+        let settings = await env.notifications.notificationSettings()
         authorizationStatus = settings.authorizationStatus
-    }
-
-    private func sendTestNotification() async {
-        let center = UNUserNotificationCenter.current()
-        let granted = (try? await center.requestAuthorization(options: [.alert, .sound])) ?? false
-        guard granted else {
-            await refreshAuthStatus()
-            return
-        }
-
-        let content = UNMutableNotificationContent()
-        content.title = "vibe-meetings"
-        content.body = "Notifications are working! You'll see alerts for meetings and summaries."
-        content.sound = .default
-
-        let request = UNNotificationRequest(
-            identifier: "test-notification-\(UUID().uuidString)",
-            content: content,
-            trigger: nil
-        )
-        try? await center.add(request)
+        alertStyle = settings.alertStyle
     }
 }
 

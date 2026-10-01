@@ -3,7 +3,8 @@ import VMCore
 import VMStorage
 import VMCalendar
 
-/// Calendar-aware "start a new meeting" sheet.
+/// Calendar-aware "start a new meeting" sheet. Creating the meeting and
+/// starting the recording is delegated to `RecordingSessionService`.
 ///
 /// Lists today's events at the top with the current/next event preselected;
 /// the user can also start a blank meeting by typing a title. When an event
@@ -135,86 +136,19 @@ struct NewMeetingSheet: View {
         creating = true
         defer { creating = false }
         do {
-            let title: String
-            let eventID: String?
-            let seriesID: String?
-            let platform: MeetingPlatform?
-            let startedAt: Date
-
+            let request: MeetingStartRequest
             switch selection {
             case .blank:
-                title = manualTitle
-                eventID = nil; seriesID = nil; platform = nil
-                startedAt = Date()
+                request = .blank(title: manualTitle)
             case .event(let id):
                 guard let ev = todaysEvents.first(where: { $0.id == id }) else {
                     throw MeetingStoreError.invalidName(id)
                 }
-                title = ev.title
-                eventID = ev.id
-                seriesID = ev.seriesID
-                platform = ev.platform
-                // For events that have already started, anchor to now; for upcoming
-                // events, anchor to the event start so the timestamps line up.
-                startedAt = max(Date(), ev.startDate)
+                request = .event(ev)
             }
-
-            // Extract metadata from calendar event if applicable.
-            var attendees: [String]?
-            var meetingType: MeetingType?
-            var org: String? = env.configuredOrgs.first // Default org
-
-            if case .event(let id) = selection,
-               let ev = todaysEvents.first(where: { $0.id == id }) {
-                if !ev.attendeeNames.isEmpty {
-                    attendees = ev.attendeeNames
-                }
-                // Infer org from calendar title (strip common suffixes like " Calendar").
-                let calTitle = ev.calendarTitle
-                let genericNames = ["calendar", "work", "personal", "home", "other"]
-                let cleaned = calTitle
-                    .replacingOccurrences(of: " Calendar", with: "")
-                    .trimmingCharacters(in: .whitespacesAndNewlines)
-                if !cleaned.isEmpty && !genericNames.contains(cleaned.lowercased()) {
-                    org = cleaned
-                }
+            if let handle = try await env.recordingService.start(request, fallbackParent: parentFolder) {
+                onCreated(handle)
             }
-
-            // Auto-detect meeting type from title.
-            meetingType = MeetingType.detect(from: title)
-
-            let draft = MeetingDraft(
-                title: title,
-                startedAt: startedAt,
-                transcriptionEngine: EngineRef(kind: type(of: env.activeTranscriptionEngine).kind, version: "1"),
-                summarizationEngine: EngineRef(kind: "ollama", version: "1"),
-                modelId: env.selectedModelId,
-                calendarEventID: eventID,
-                calendarSeriesID: seriesID,
-                meetingPlatform: platform,
-                meetingType: meetingType,
-                attendees: attendees,
-                org: org
-            )
-
-            // Folder routing: series → person (for 1:1s) → org → parentFolder.
-            let target: FolderNode
-            if let sid = seriesID,
-               let existing = await env.meetingStore.folderForSeries(sid) {
-                target = existing
-            } else if meetingType == .oneOnOne,
-                      let personName = attendees?.first(where: { $0.lowercased() != "you" }) ?? attendees?.first,
-                      let personFolder = await env.meetingStore.folderForPerson(personName) {
-                target = personFolder
-            } else if let orgName = org,
-                      let orgFolder = await env.meetingStore.folderForOrg(orgName) {
-                target = orgFolder
-            } else {
-                target = parentFolder
-            }
-
-            let handle = try await env.meetingStore.createMeeting(in: target, draft: draft)
-            onCreated(handle)
             dismiss()
         } catch {
             self.error = error.localizedDescription
@@ -230,13 +164,7 @@ private struct EventRow: View {
             VStack(alignment: .leading, spacing: 2) {
                 HStack(spacing: 6) {
                     Text(event.title).lineLimit(1)
-                    if event.hasTeamsURL {
-                        Text("Teams")
-                            .font(.caption2.bold())
-                            .padding(.horizontal, 5).padding(.vertical, 2)
-                            .background(Color.purple.opacity(0.2), in: Capsule())
-                            .foregroundStyle(.purple)
-                    }
+                    PlatformBadge(event: event)
                 }
                 Text("\(event.startDate.formatted(date: .omitted, time: .shortened)) · \(event.calendarTitle)")
                     .font(.caption)

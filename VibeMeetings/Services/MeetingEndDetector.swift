@@ -1,14 +1,13 @@
 import AppKit
 import Foundation
 import Observation
-import UserNotifications
 import VMCalendar
 import VMCore
 
 /// Detects when a meeting has likely ended by combining multiple signals:
 /// - Calendar scheduled end time
 /// - Extended audio silence (both mic and system audio)
-/// - Meeting app (Teams, Zoom) no longer in a call
+/// - Meeting app (Teams, Zoom) quit, or released the microphone
 ///
 /// Publishes a `shouldSuggestEnd` flag and a human-readable `reason`.
 @Observable
@@ -76,23 +75,8 @@ final class MeetingEndDetector {
     /// We only trigger app-exit detection if the app was running at start.
     private var meetingAppWasRunning = false
 
-    /// The bundle IDs of meeting apps to monitor.
-    private static let meetingAppBundleIDs: Set<String> = [
-        "com.microsoft.teams",           // Teams classic
-        "com.microsoft.teams2",          // Teams new (work/school)
-        "us.zoom.xos",                   // Zoom
-        "us.zoom.videomeeting",          // Zoom alt
-        "com.google.Chrome",             // Google Meet (runs in Chrome)
-    ]
-
-    /// Process names to check as fallback (for apps without stable bundle IDs).
-    private static let meetingAppProcessNames: Set<String> = [
-        "Microsoft Teams",
-        "Microsoft Teams (work or school)",
-        "Microsoft Teams classic",
-        "zoom.us",
-        "Zoom",
-    ]
+    /// Posts the mic-silence warning. Set by `AppEnvironment`.
+    var notifications: NotificationManager?
 
     private static let enabledKey = "VibeMeetings.AutoEndDetection.Enabled"
     private static let silenceKey = "VibeMeetings.AutoEndDetection.SilenceSeconds"
@@ -197,29 +181,11 @@ final class MeetingEndDetector {
             }
             if Date().timeIntervalSince(micSilenceStartedAt!) >= micSilenceWarningSeconds {
                 micSilenceNotified = true
-                Task { await self.postMicSilenceNotification() }
+                Task { await self.notifications?.postMicSilence() }
             }
         } else {
             micSilenceStartedAt = nil
         }
-    }
-
-    private func postMicSilenceNotification() async {
-        let center = UNUserNotificationCenter.current()
-        let granted = (try? await center.requestAuthorization(options: [.alert, .sound])) ?? false
-        guard granted else { return }
-
-        let content = UNMutableNotificationContent()
-        content.title = "No Microphone Input"
-        content.body = "Your microphone doesn't seem to be picking up any audio. Check it isn't muted or that the right input device is selected."
-        content.sound = .default
-
-        let request = UNNotificationRequest(
-            identifier: "mic-silence-\(UUID().uuidString)",
-            content: content,
-            trigger: nil // deliver immediately
-        )
-        try? await center.add(request)
     }
 
     // MARK: - Signal: Calendar end time
@@ -247,29 +213,21 @@ final class MeetingEndDetector {
         }
     }
 
-    /// Returns true if any known meeting app is currently running.
+    /// Called by call detection when the app that held the microphone for
+    /// the call being recorded has let go of it for over a minute — a much
+    /// earlier and more reliable signal than the app quitting.
+    func callAppReleasedMic(appName: String?) {
+        guard autoEndEnabled, appMonitoringEnabled, !dismissed else { return }
+        suggest(reason: "\(appName ?? "The meeting app") released the microphone")
+    }
+
+    /// Returns true if any known (dedicated) meeting app is currently running.
     private func isMeetingAppRunning() -> Bool {
-        let runningApps = NSWorkspace.shared.runningApplications
-
-        // Check by bundle ID.
-        for app in runningApps {
-            if let bundleID = app.bundleIdentifier,
-               Self.meetingAppBundleIDs.contains(bundleID),
-               !app.isTerminated {
-                return true
-            }
-        }
-
-        // Fallback: check by process name.
-        for app in runningApps {
-            if let name = app.localizedName,
-               Self.meetingAppProcessNames.contains(name),
-               !app.isTerminated {
-                return true
-            }
-        }
-
-        return false
+        MeetingAppCatalog.runningCallApp(
+            in: NSWorkspace.shared.runningApplications
+                .filter { !$0.isTerminated }
+                .map { (bundleID: $0.bundleIdentifier, name: $0.localizedName) }
+        ) != nil
     }
 
     // MARK: - Private

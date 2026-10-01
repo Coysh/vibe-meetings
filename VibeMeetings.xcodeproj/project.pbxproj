@@ -52,6 +52,18 @@
 		DE91E996433585F7D716E435 /* PermissionsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5D46462FAD39A3C94C95BF8F /* PermissionsView.swift */; };
 		E63F6D86F7598EE110BB9492 /* VMCalendar in Frameworks */ = {isa = PBXBuildFile; productRef = B3AC476BB41917B26FAFA9BE /* VMCalendar */; };
 		F480CC67A2DFAB5C5AA8A0CE /* VibeMeetingsApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = 90C3DE5D995DE8E9CD969C29 /* VibeMeetingsApp.swift */; };
+		044314CED2070946013A91FD /* AppContainer.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5B65DFB6F236B46402B34413 /* AppContainer.swift */; };
+		01F8C0D1E10962ECEF5A0D13 /* AppRouter.swift in Sources */ = {isa = PBXBuildFile; fileRef = 281BF662D60D1CCEAE1E4DCA /* AppRouter.swift */; };
+		025D0EED0464C81107D92583 /* MainWindowPresenter.swift in Sources */ = {isa = PBXBuildFile; fileRef = 898EF1EBD30204AFAD76B175 /* MainWindowPresenter.swift */; };
+		2088E13E8FB36894F7843DBA /* NotificationManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = DB63FCDAC42E843D412C70DA /* NotificationManager.swift */; };
+		72B6A07D2DBE3076683DEE33 /* NotificationActionRouter.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0C438609695A8AD69DF5EDC2 /* NotificationActionRouter.swift */; };
+		8BFD9DA37A0D93EF95C688C7 /* MeetingDraftFactory.swift in Sources */ = {isa = PBXBuildFile; fileRef = B1A27004B707A5F18BBB7638 /* MeetingDraftFactory.swift */; };
+		DF7520853727829D7EDA0836 /* RecordingSessionService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5021C02F30EAF2F4AF275719 /* RecordingSessionService.swift */; };
+		9C71BEF7BD9FF4F03EF35CB1 /* EventReminderScheduler.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1E83F4E19021F14ECEA44CC8 /* EventReminderScheduler.swift */; };
+		D15B50D3246C2775381AA7E4 /* RecordingOverlayController.swift in Sources */ = {isa = PBXBuildFile; fileRef = DDCE5D0446F5E0363E6C63BB /* RecordingOverlayController.swift */; };
+		449E393F6FE636CCCDCD6765 /* RecordingOverlayView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 685814FD59B237F2B72B1D6F /* RecordingOverlayView.swift */; };
+		9DF4B514EB8AA8FA248F9D2B /* MenuBarContentView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1EFFE447BF9DBF26B40A8B33 /* MenuBarContentView.swift */; };
+		C78038A62408394DEB07D3BA /* PlatformBadge.swift in Sources */ = {isa = PBXBuildFile; fileRef = EC4138DD2B0CF8A0E652F929 /* PlatformBadge.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
@@ -100,6 +112,18 @@
 		E6C3B037EBD9FA1AF9E0A374 /* RootView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RootView.swift; sourceTree = "<group>"; };
 		EAEF86E1A60C4514C0ADB2BF /* SuggestionBanner.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SuggestionBanner.swift; sourceTree = "<group>"; };
 		F4E9999254F7EC94F1894BCB /* VMSummarization */ = {isa = PBXFileReference; lastKnownFileType = folder; name = VMSummarization; path = Packages/VMSummarization; sourceTree = SOURCE_ROOT; };
+		5B65DFB6F236B46402B34413 /* AppContainer.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppContainer.swift; sourceTree = "<group>"; };
+		281BF662D60D1CCEAE1E4DCA /* AppRouter.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppRouter.swift; sourceTree = "<group>"; };
+		898EF1EBD30204AFAD76B175 /* MainWindowPresenter.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MainWindowPresenter.swift; sourceTree = "<group>"; };
+		DB63FCDAC42E843D412C70DA /* NotificationManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NotificationManager.swift; sourceTree = "<group>"; };
+		0C438609695A8AD69DF5EDC2 /* NotificationActionRouter.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NotificationActionRouter.swift; sourceTree = "<group>"; };
+		B1A27004B707A5F18BBB7638 /* MeetingDraftFactory.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MeetingDraftFactory.swift; sourceTree = "<group>"; };
+		5021C02F30EAF2F4AF275719 /* RecordingSessionService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RecordingSessionService.swift; sourceTree = "<group>"; };
+		1E83F4E19021F14ECEA44CC8 /* EventReminderScheduler.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EventReminderScheduler.swift; sourceTree = "<group>"; };
+		DDCE5D0446F5E0363E6C63BB /* RecordingOverlayController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RecordingOverlayController.swift; sourceTree = "<group>"; };
+		685814FD59B237F2B72B1D6F /* RecordingOverlayView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RecordingOverlayView.swift; sourceTree = "<group>"; };
+		1EFFE447BF9DBF26B40A8B33 /* MenuBarContentView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MenuBarContentView.swift; sourceTree = "<group>"; };
+		EC4138DD2B0CF8A0E652F929 /* PlatformBadge.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PlatformBadge.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -164,6 +188,11 @@
 				4FCAC1B12FB3372500AC4E2E /* MeetingEndDetector.swift */,
 				4FCAC1B82FB512EB00AC4E2E /* MeetingChatService.swift */,
 				4FCAC1BD2FB513B100AC4E2E /* SparkleUpdater.swift */,
+				281BF662D60D1CCEAE1E4DCA /* AppRouter.swift */,
+				898EF1EBD30204AFAD76B175 /* MainWindowPresenter.swift */,
+				0F7C356EA5ED3DB4273B00B5 /* Notifications */,
+				7B0342DB0F005DF7E3156EAC /* Recording */,
+				4063E40560E595CBF7083592 /* Detection */,
 			);
 			path = Services;
 			sourceTree = "<group>";
@@ -200,6 +229,9 @@
 				4FCAC1B32FB3724100AC4E2E /* Dashboard */,
 				4FCAC1BA2FB5130200AC4E2E /* Chat */,
 				4FCAC1C22FB52D1200AC4E2E /* AboutView.swift */,
+				E1E55B1EC97CC73DC9A4A006 /* Overlay */,
+				7B88F2386B8C1A433A31AD77 /* MenuBar */,
+				7996FA77A4667E365DFED2A2 /* Common */,
 			);
 			path = UI;
 			sourceTree = "<group>";
@@ -287,8 +319,60 @@
 				9D2C709ECDB571EC6DD74D53 /* UI */,
 				4FE233332FB22E7F006F29C4 /* SummaryGenerationService.swift */,
 				4FE233392FB27646006F29C4 /* Services */,
+				5B65DFB6F236B46402B34413 /* AppContainer.swift */,
 			);
 			path = VibeMeetings;
+			sourceTree = "<group>";
+		};
+		0F7C356EA5ED3DB4273B00B5 /* Notifications */ = {
+			isa = PBXGroup;
+			children = (
+				DB63FCDAC42E843D412C70DA /* NotificationManager.swift */,
+				0C438609695A8AD69DF5EDC2 /* NotificationActionRouter.swift */,
+			);
+			path = Notifications;
+			sourceTree = "<group>";
+		};
+		7B0342DB0F005DF7E3156EAC /* Recording */ = {
+			isa = PBXGroup;
+			children = (
+				B1A27004B707A5F18BBB7638 /* MeetingDraftFactory.swift */,
+				5021C02F30EAF2F4AF275719 /* RecordingSessionService.swift */,
+			);
+			path = Recording;
+			sourceTree = "<group>";
+		};
+		4063E40560E595CBF7083592 /* Detection */ = {
+			isa = PBXGroup;
+			children = (
+				1E83F4E19021F14ECEA44CC8 /* EventReminderScheduler.swift */,
+			);
+			path = Detection;
+			sourceTree = "<group>";
+		};
+		E1E55B1EC97CC73DC9A4A006 /* Overlay */ = {
+			isa = PBXGroup;
+			children = (
+				DDCE5D0446F5E0363E6C63BB /* RecordingOverlayController.swift */,
+				685814FD59B237F2B72B1D6F /* RecordingOverlayView.swift */,
+			);
+			path = Overlay;
+			sourceTree = "<group>";
+		};
+		7B88F2386B8C1A433A31AD77 /* MenuBar */ = {
+			isa = PBXGroup;
+			children = (
+				1EFFE447BF9DBF26B40A8B33 /* MenuBarContentView.swift */,
+			);
+			path = MenuBar;
+			sourceTree = "<group>";
+		};
+		7996FA77A4667E365DFED2A2 /* Common */ = {
+			isa = PBXGroup;
+			children = (
+				EC4138DD2B0CF8A0E652F929 /* PlatformBadge.swift */,
+			);
+			path = Common;
 			sourceTree = "<group>";
 		};
 /* End PBXGroup section */
@@ -415,6 +499,18 @@
 				D64043B5A83483AE80CD1626 /* SummaryView.swift in Sources */,
 				3A6AF8EABE44CB002FB13860 /* TranscriptView.swift in Sources */,
 				F480CC67A2DFAB5C5AA8A0CE /* VibeMeetingsApp.swift in Sources */,
+				044314CED2070946013A91FD /* AppContainer.swift in Sources */,
+				01F8C0D1E10962ECEF5A0D13 /* AppRouter.swift in Sources */,
+				025D0EED0464C81107D92583 /* MainWindowPresenter.swift in Sources */,
+				2088E13E8FB36894F7843DBA /* NotificationManager.swift in Sources */,
+				72B6A07D2DBE3076683DEE33 /* NotificationActionRouter.swift in Sources */,
+				8BFD9DA37A0D93EF95C688C7 /* MeetingDraftFactory.swift in Sources */,
+				DF7520853727829D7EDA0836 /* RecordingSessionService.swift in Sources */,
+				9C71BEF7BD9FF4F03EF35CB1 /* EventReminderScheduler.swift in Sources */,
+				D15B50D3246C2775381AA7E4 /* RecordingOverlayController.swift in Sources */,
+				449E393F6FE636CCCDCD6765 /* RecordingOverlayView.swift in Sources */,
+				9DF4B514EB8AA8FA248F9D2B /* MenuBarContentView.swift in Sources */,
+				C78038A62408394DEB07D3BA /* PlatformBadge.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};

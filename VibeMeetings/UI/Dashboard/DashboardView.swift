@@ -83,7 +83,7 @@ struct DashboardView: View {
         let isActive = event.startDate <= now && event.endDate > now
 
         return Button {
-            NotificationCenter.default.post(name: .newMeetingRequested, object: nil)
+            env.appRouter.requestNewMeeting(preselectEventID: event.id)
         } label: {
             HStack(spacing: 12) {
                 RoundedRectangle(cornerRadius: 2)
@@ -98,9 +98,7 @@ struct DashboardView: View {
                         Text(formatTimeRange(start: event.startDate, end: event.endDate))
                             .font(.caption)
                             .foregroundStyle(.secondary)
-                        if event.hasTeamsURL {
-                            platformBadge("Teams", color: .purple)
-                        }
+                        PlatformBadge(event: event)
                         if !event.attendeeNames.isEmpty {
                             Text("\(event.attendeeNames.count) attendees")
                                 .font(.caption)
@@ -130,15 +128,6 @@ struct DashboardView: View {
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
-    }
-
-    private func platformBadge(_ text: String, color: Color) -> some View {
-        Text(text)
-            .font(.caption2.bold())
-            .foregroundStyle(color)
-            .padding(.horizontal, 6)
-            .padding(.vertical, 2)
-            .background(color.opacity(0.12), in: Capsule())
     }
 
     private func formatTimeRange(start: Date, end: Date) -> String {

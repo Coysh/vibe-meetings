@@ -1,3 +1,4 @@
+import AVFoundation
 import CoreAudio
 import Foundation
 import Observation
@@ -24,12 +25,20 @@ final class AppEnvironment {
     let updateChecker = UpdateChecker()
     let sparkleUpdater = SparkleUpdater()
     let meetingEndDetector = MeetingEndDetector()
+    let notifications = NotificationManager()
+    let appRouter = AppRouter()
+    @ObservationIgnored let presenter = MainWindowPresenter()
+    @ObservationIgnored let eventReminders: EventReminderScheduler
+    @ObservationIgnored private(set) lazy var recordingService = RecordingSessionService(env: self)
+    @ObservationIgnored private var overlay: RecordingOverlayController?
+    @ObservationIgnored private var treeTask: Task<Void, Never>?
+    @ObservationIgnored private var bootstrapped = false
 
-    /// The current in-progress recording, if any. Set by `RootView` when a
-    /// meeting starts; cleared when the user stops. Drives the banner's
-    /// "don't suggest while already recording" rule and is the single source
-    /// of truth for whether a recording is live.
-    var activeRecordingController: RecordingController?
+    /// The current in-progress recording, if any. Owned by
+    /// `RecordingSessionService`; drives the "don't suggest while already
+    /// recording" rule and is the single source of truth for whether a
+    /// recording is live.
+    var activeRecordingController: RecordingController? { recordingService.controller }
 
     /// Selected default model id (`whisper-medium` per plan).
     var selectedModelId: String
@@ -90,6 +99,12 @@ final class AppEnvironment {
     private static let notifyPreMeetingReminderKey = "VibeMeetings.Notify.PreMeetingReminder"
     private static let notifySummaryReadyKey = "VibeMeetings.Notify.SummaryReady"
     private static let notifyReminderMinutesKey = "VibeMeetings.Notify.ReminderMinutes"
+    private static let notifyEscalatingKey = "VibeMeetings.Notify.EscalatingReminders"
+    private static let notifyAtEventStartKey = "VibeMeetings.Notify.AtEventStart"
+    private static let detectBrowserCallsKey = "VibeMeetings.Detection.BrowserCalls"
+    private static let showOverlayKey = "VibeMeetings.Overlay.Enabled"
+    /// `@AppStorage` key for the menu bar extra (read by the App scene).
+    static let menuBarEnabledKey = "VibeMeetings.MenuBar.Enabled"
 
     /// Whether to post a system notification when a meeting/call is detected.
     var notifyMeetingDetected: Bool {
@@ -98,7 +113,10 @@ final class AppEnvironment {
 
     /// Whether to post pre-meeting reminder notifications before calendar events.
     var notifyPreMeetingReminder: Bool {
-        didSet { UserDefaults.standard.set(notifyPreMeetingReminder, forKey: Self.notifyPreMeetingReminderKey) }
+        didSet {
+            UserDefaults.standard.set(notifyPreMeetingReminder, forKey: Self.notifyPreMeetingReminderKey)
+            eventReminders.setNeedsReconcile()
+        }
     }
 
     /// Whether to post a notification when summary generation completes.
@@ -111,7 +129,34 @@ final class AppEnvironment {
 
     /// How many minutes before a meeting to send the reminder (default 3).
     var notifyReminderMinutes: Int {
-        didSet { UserDefaults.standard.set(notifyReminderMinutes, forKey: Self.notifyReminderMinutesKey) }
+        didSet {
+            UserDefaults.standard.set(notifyReminderMinutes, forKey: Self.notifyReminderMinutesKey)
+            eventReminders.setNeedsReconcile()
+        }
+    }
+
+    /// Keep re-sending the "not recording" reminder (now, +2, +5, then every
+    /// 5 min) instead of sending it once per call.
+    var notifyEscalatingReminders: Bool {
+        didSet { UserDefaults.standard.set(notifyEscalatingReminders, forKey: Self.notifyEscalatingKey) }
+    }
+
+    /// Also notify at the start time of calendar events with a join link.
+    var notifyAtEventStart: Bool {
+        didSet {
+            UserDefaults.standard.set(notifyAtEventStart, forKey: Self.notifyAtEventStartKey)
+            eventReminders.setNeedsReconcile()
+        }
+    }
+
+    /// Treat a browser using the microphone as a call (Google Meet, Teams web…).
+    var detectBrowserCalls: Bool {
+        didSet { UserDefaults.standard.set(detectBrowserCalls, forKey: Self.detectBrowserCallsKey) }
+    }
+
+    /// Show the floating "not recording / recording" indicator.
+    var showRecordingOverlay: Bool {
+        didSet { UserDefaults.standard.set(showRecordingOverlay, forKey: Self.showOverlayKey) }
     }
 
     init() throws {
@@ -177,6 +222,10 @@ final class AppEnvironment {
         self.notifyPreMeetingReminder = defaults.object(forKey: Self.notifyPreMeetingReminderKey) as? Bool ?? true
         self.notifySummaryReady = defaults.object(forKey: Self.notifySummaryReadyKey) as? Bool ?? true
         self.notifyReminderMinutes = defaults.object(forKey: Self.notifyReminderMinutesKey) as? Int ?? 3
+        self.notifyEscalatingReminders = defaults.object(forKey: Self.notifyEscalatingKey) as? Bool ?? true
+        self.notifyAtEventStart = defaults.object(forKey: Self.notifyAtEventStartKey) as? Bool ?? true
+        self.detectBrowserCalls = defaults.object(forKey: Self.detectBrowserCallsKey) as? Bool ?? true
+        self.showRecordingOverlay = defaults.object(forKey: Self.showOverlayKey) as? Bool ?? true
 
         if storedSummKind == OpenAIEngine.kind && !storedOpenAIKey.isEmpty {
             self.summarizationEngine = OpenAIEngine(apiKey: storedOpenAIKey, promptBundle: .main)
@@ -188,10 +237,64 @@ final class AppEnvironment {
 
         let cal = EventKitCalendarService()
         self.calendarService = cal
-        self.bannerCoordinator = BannerCoordinator(calendar: cal)
+        self.bannerCoordinator = BannerCoordinator(calendar: cal, notifications: notifications)
+        self.eventReminders = EventReminderScheduler(calendar: cal, notifications: notifications)
 
         // Sync summary notification preference to the service (after all stored properties init).
         self.summaryService.notificationsEnabled = self.notifySummaryReady
+        self.summaryService.notifications = notifications
+        self.meetingEndDetector.notifications = notifications
+    }
+
+    /// Starts everything that must run whether or not a window is open:
+    /// call detection, calendar reminders, the folder tree, the overlay.
+    /// Called from `applicationDidFinishLaunching`; safe to call again.
+    func bootstrap() {
+        guard !bootstrapped else { return }
+        bootstrapped = true
+
+        bannerCoordinator.configure(
+            isRecording: { [unowned self] in recordingService.isBusy },
+            activeEvent: { [unowned self] in activeRecordingController?.linkedCalendarEvent },
+            meetingEndDetector: meetingEndDetector,
+            notifyMeetingDetected: { [unowned self] in notifyMeetingDetected },
+            escalatingReminders: { [unowned self] in notifyEscalatingReminders },
+            detectBrowserCalls: { [unowned self] in detectBrowserCalls },
+            isMainWindowKey: { [unowned self] in presenter.isMainWindowKey },
+            onCalendarChanged: { [unowned self] in eventReminders.setNeedsReconcile() }
+        )
+        eventReminders.setProviders(
+            leadMinutes: { [unowned self] in notifyPreMeetingReminder ? notifyReminderMinutes : nil },
+            atStart: { [unowned self] in notifyAtEventStart }
+        )
+
+        startTreeSubscription()
+
+        let overlay = RecordingOverlayController(env: self)
+        overlay.start()
+        self.overlay = overlay
+
+        Task {
+            // Request permissions on every launch. If already granted these are
+            // no-ops; if macOS reset them after an app update (ad-hoc signing
+            // changes the code identity) the user gets re-prompted immediately
+            // instead of discovering broken features later.
+            _ = await AVCaptureDevice.requestAccess(for: .audio)
+            _ = await calendarService.requestAccess()
+            await notifications.ensureAuthorized()
+            bannerCoordinator.start()
+            eventReminders.start()
+        }
+    }
+
+    private func startTreeSubscription() {
+        treeTask?.cancel()
+        let store = meetingStore
+        treeTask = Task { [weak self] in
+            for await tree in store.tree {
+                self?.folderTree = tree
+            }
+        }
     }
 
     /// Fetch the latest tree from the store and update `folderTree` on the
@@ -204,6 +307,7 @@ final class AppEnvironment {
     func setRoot(_ url: URL) throws {
         self.rootURL = url
         self.meetingStore = try FilesystemMeetingStore(rootURL: url)
+        if bootstrapped { startTreeSubscription() }
         if let bookmark = try? url.bookmarkData(options: [.withSecurityScope], includingResourceValuesForKeys: nil, relativeTo: nil) {
             UserDefaults.standard.set(bookmark, forKey: "VibeMeetings.RootURL.bookmark")
         }

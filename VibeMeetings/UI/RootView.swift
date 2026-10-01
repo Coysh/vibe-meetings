@@ -1,20 +1,17 @@
 import SwiftUI
-import AVFoundation
-import EventKit
 import VMCore
 import VMStorage
 import VMSummarization
 
 struct RootView: View {
     @Environment(AppEnvironment.self) private var env
+    @Environment(\.openWindow) private var openWindow
     @State private var selection: Set<SidebarSelection> = []
-    @State private var newMeetingSheet = false
-    @State private var preselectedEventID: String?
+    @State private var newMeetingRequest: AppRouter.NewMeetingRequest?
     @State private var showTriageSheet = false
     @State private var showChatPanel = false
     @State private var chatFocusedMeetingID: UUID?
-    @State private var postRecordingMeetingID: UUID?
-    @State private var postRecordingFolderURL: URL?
+    @State private var postRecording: AppRouter.PostRecordingItem?
 
     var body: some View {
         NavigationSplitView {
@@ -27,9 +24,7 @@ struct RootView: View {
         } detail: {
             VStack(spacing: 0) {
                 if let controller = env.activeRecordingController {
-                    RecordingBarView(controller: controller, onStopped: {
-                        handleRecordingStopped()
-                    }, onNavigateToMeeting: {
+                    RecordingBarView(controller: controller, onNavigateToMeeting: {
                         if let id = controller.meetingHandle?.meeting.id {
                             selection = [.meeting(id)]
                         }
@@ -56,19 +51,16 @@ struct RootView: View {
                         SuggestionBanner(
                             event: ev,
                             onStart: {
-                                preselectedEventID = ev.id
-                                newMeetingSheet = true
+                                Task { try? await env.recordingService.start(.event(ev)) }
                             },
                             onDismiss: { env.bannerCoordinator.dismiss(ev) }
                         )
-                    }
-                    if env.bannerCoordinator.micActiveSuggestion {
+                    } else if env.bannerCoordinator.micActiveSuggestion {
                         MicActiveBanner(
                             eventTitle: env.bannerCoordinator.micEventTitle,
                             appName: env.bannerCoordinator.micActiveAppName,
                             onStart: {
-                                env.bannerCoordinator.dismissMicSuggestion()
-                                newMeetingSheet = true
+                                Task { await env.recordingService.startDetectedCall() }
                             },
                             onDismiss: { env.bannerCoordinator.dismissMicSuggestion() }
                         )
@@ -78,12 +70,7 @@ struct RootView: View {
                             reason: env.bannerCoordinator.meetingEndReason,
                             onStop: {
                                 env.bannerCoordinator.dismissMeetingEnd()
-                                if let controller = env.activeRecordingController {
-                                    Task {
-                                        _ = await controller.stop()
-                                        handleRecordingStopped()
-                                    }
-                                }
+                                Task { await env.recordingService.stop(reason: .meetingEnded) }
                             },
                             onKeep: { env.bannerCoordinator.dismissMeetingEnd() }
                         )
@@ -92,34 +79,18 @@ struct RootView: View {
                 }
             }
         }
-        .task {
-            let env = self.env
-
-            // Request permissions on every launch. If already granted these are
-            // no-ops; if macOS reset them after an app update (ad-hoc signing
-            // changes the code identity) the user gets re-prompted immediately
-            // instead of discovering broken features later.
-            _ = await AVCaptureDevice.requestAccess(for: .audio)
-            _ = await env.calendarService.requestAccess()
-
-            env.bannerCoordinator.setIsRecordingProvider {
-                env.activeRecordingController?.state == .recording
-            }
-            env.bannerCoordinator.setActiveEventProvider {
-                env.activeRecordingController?.linkedCalendarEvent
-            }
-            env.bannerCoordinator.setMeetingEndDetector(env.meetingEndDetector)
-            env.bannerCoordinator.setNotificationProviders(
-                meetingDetected: { env.notifyMeetingDetected },
-                preMeetingReminder: { env.notifyPreMeetingReminder },
-                reminderMinutes: { env.notifyReminderMinutes }
-            )
-            env.bannerCoordinator.start()
-            // Sparkle handles update checks automatically on launch.
-            for await tree in env.meetingStore.tree {
-                env.folderTree = tree
-            }
+        .onAppear {
+            // Lets notification actions / the menu bar reopen this window
+            // after it's been closed.
+            env.presenter.openWindow = openWindow
+            consumeRouterRequests()
         }
+        .onChange(of: env.appRouter.pendingNewMeeting) { consumeRouterRequests() }
+        .onChange(of: env.appRouter.pendingPostRecording) { consumeRouterRequests() }
+        .onChange(of: env.appRouter.selectMeetingID) { consumeRouterRequests() }
+        // A request queued behind an open sheet is picked up once it closes.
+        .onChange(of: newMeetingRequest == nil) { consumeRouterRequests() }
+        .onChange(of: postRecording == nil) { consumeRouterRequests() }
         .toolbar {
             ToolbarItem(placement: .navigation) {
                 Button {
@@ -156,90 +127,34 @@ struct RootView: View {
         .sheet(isPresented: $showTriageSheet) {
             MeetingTriageView()
         }
-        .sheet(isPresented: $newMeetingSheet, onDismiss: { preselectedEventID = nil }) {
+        .sheet(item: $newMeetingRequest) { request in
             if let parent = resolvedParentForNewMeeting() {
-                NewMeetingSheet(parentFolder: parent, preselectedEventID: preselectedEventID) { handle in
+                NewMeetingSheet(parentFolder: parent, preselectedEventID: request.preselectEventID) { handle in
                     selection = [.meeting(handle.meeting.id)]
-                    let c = RecordingController(env: env)
-                    env.activeRecordingController = c
-                    env.bannerCoordinator.recordingDidStart()
-                    Task { await c.start(handle: handle) }
                 }
             }
         }
-        .onReceive(NotificationCenter.default.publisher(for: .newMeetingRequested)) { notification in
-            if let eventID = notification.userInfo?["preselectedEventID"] as? String {
-                preselectedEventID = eventID
-            }
-            newMeetingSheet = true
-        }
-        .sheet(isPresented: Binding(
-            get: { postRecordingMeetingID != nil },
-            set: { if !$0 { postRecordingMeetingID = nil; postRecordingFolderURL = nil } }
-        )) {
-            if let meetingID = postRecordingMeetingID,
-               let folderURL = postRecordingFolderURL {
-                PostRecordingSheet(meetingID: meetingID, meetingFolderURL: folderURL)
-            }
+        .sheet(item: $postRecording) { item in
+            PostRecordingSheet(meetingID: item.meetingID, meetingFolderURL: item.folderURL)
         }
     }
 
-    /// Captures the meeting info from the just-finished recording, clears the
-    /// recording controller, presents the post-recording metadata sheet, and
-    /// kicks off background summary generation automatically from the
-    /// dual-channel (You/Others) transcript.
-    private func handleRecordingStopped() {
-        guard let controller = env.activeRecordingController,
-              let handle = controller.meetingHandle else {
-            env.activeRecordingController = nil
-            return
+    /// Moves app-level requests (from notifications, the menu bar, the
+    /// overlay or the recording service) into this window's local state.
+    private func consumeRouterRequests() {
+        let router = env.appRouter
+        if let id = router.selectMeetingID {
+            router.selectMeetingID = nil
+            selection = [.meeting(id)]
         }
-        let meetingID = handle.meeting.id
-        let folderURL = handle.folderURL
-
-        // Snapshot data needed for summary before clearing the controller.
-        let segments = controller.liveSegments.map { seg in
-            var s = seg
-            s.isPartial = false
-            return s
+        // One sheet at a time: a finished recording's review takes priority.
+        if let item = router.pendingPostRecording, newMeetingRequest == nil {
+            router.pendingPostRecording = nil
+            postRecording = item
+        } else if let request = router.pendingNewMeeting, postRecording == nil {
+            router.pendingNewMeeting = nil
+            newMeetingRequest = request
         }
-        let meeting = handle.meeting
-        let userNotes = controller.notes.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
-            ? nil : controller.notes
-
-        env.activeRecordingController = nil
-        postRecordingFolderURL = folderURL
-        postRecordingMeetingID = meetingID
-
-        // Auto-generate the summary in the background (silently, no
-        // notification) from the dual-channel live transcript, which
-        // `RecordingController.stop()` has already cleaned and persisted.
-        // NOTE: we deliberately do NOT re-transcribe the echo-reduced audio —
-        // that file is mono with the other party spectrally removed, so it
-        // would collapse both speakers into one and drop the "Others" side.
-        guard !segments.isEmpty else { return }
-
-        let modelId = env.activeSummarizationKind == OpenAIEngine.kind
-            ? env.selectedOpenAIModelId
-            : env.selectedOllamaModelId
-        let prompt = env.customSystemPrompt.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
-            ? nil : env.customSystemPrompt
-        let engine = env.summarizationEngine
-        let store = env.meetingStore
-        let summaryService = env.summaryService
-
-        summaryService.generate(
-            meetingID: meetingID,
-            meetingTitle: meeting.title,
-            segments: segments,
-            meeting: meeting,
-            engine: engine,
-            modelId: modelId,
-            userNotes: userNotes,
-            customPrompt: prompt,
-            store: store,
-            silent: true
-        )
     }
 
     /// The folder a new meeting should be created inside, given the current

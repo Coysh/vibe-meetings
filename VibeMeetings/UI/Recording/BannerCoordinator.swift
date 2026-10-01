@@ -1,32 +1,35 @@
 import AppKit
 import Foundation
 import Observation
-import UserNotifications
 import VMCalendar
+import VMCore
 import VMRecording
 
-/// Decides when the "a Teams meeting is starting — start recording?" banner
-/// should be visible. Polls every 30 s and reacts to `EKEventStoreChanged`.
+/// Call awareness: decides when to nudge the user to record.
 ///
-/// Also monitors:
-/// - Microphone activity (another app opens the mic while we're not recording)
-/// - Calendar event end (the linked calendar event has ended but we're still recording)
+/// - Watches which apps hold the microphone (on any input device) via
+///   `ProcessMicActivityMonitor`, and feeds that into `CallSessionMachine`,
+///   which debounces blips, tolerates mute toggles and runs the escalating
+///   "you're in a call and not recording" reminder schedule.
+/// - Drives the in-app banners (calendar suggestion, detected call, meeting
+///   probably ended) and the state shown by the overlay and menu bar.
 @Observable
 @MainActor
 final class BannerCoordinator {
-    // MARK: - Banner states
+    // MARK: - Published state
 
-    /// "Teams meeting is starting — start recording?"
+    /// "<event> is starting — start recording?" (calendar-driven banner).
     var currentSuggestion: CalendarEvent?
 
-    /// "Your microphone just became active — start recording?"
-    var micActiveSuggestion: Bool = false
+    /// The call in progress (recorded or not), if any.
+    private(set) var currentCall: CallSession?
 
-    /// Calendar event title to show in the mic banner, if a current event was found.
-    var micEventTitle: String?
+    /// The call in progress if it's unrecorded and the user hasn't opted out
+    /// ("Not a meeting"). Drives the overlay, menu bar and in-app banner.
+    private(set) var unrecordedCall: CallSession?
 
-    /// Name of the app currently using the microphone (e.g., "Microsoft Teams").
-    var micActiveAppName: String?
+    /// Calendar event matching the current call, if any.
+    private(set) var matchedEvent: CalendarEvent?
 
     /// "The meeting has likely ended — stop recording?"
     var meetingEndSuggestion: Bool = false
@@ -34,196 +37,197 @@ final class BannerCoordinator {
     /// Human-readable reason for the meeting end suggestion (e.g., "No audio for 2 minutes").
     var meetingEndReason: String = ""
 
+    // In-app "call detected" banner (MicActiveBanner).
+    var micActiveSuggestion: Bool { unrecordedCall != nil }
+    var micEventTitle: String? { unrecordedCall == nil ? nil : matchedEvent?.title }
+    var micActiveAppName: String? { unrecordedCall?.client.appName }
+
+    var isCallSnoozed: Bool {
+        if case .snoozed = unrecordedCall?.reminder { return true }
+        return false
+    }
+
     // MARK: - Dependencies
 
     private let calendar: any CalendarService
-    private let micMonitor = MicrophoneActivityMonitor()
+    private let notifications: NotificationManager
+    private let micMonitor = ProcessMicActivityMonitor()
+    private var machine = CallSessionMachine()
 
     private var dismissalExpiries: [String: Date] = [:]
     private var pollingTask: Task<Void, Never>?
     private var streamTask: Task<Void, Never>?
     private var micMonitorTask: Task<Void, Never>?
-    private var meetingEndTask: Task<Void, Never>?
+    private var tickTask: Task<Void, Never>?
+    private var started = false
+
+    /// Upcoming/in-progress events, refreshed every poll and on calendar changes.
+    private(set) var cachedEvents: [CalendarEvent] = []
 
     private var isRecordingProvider: () -> Bool = { false }
     private var activeEventProvider: () -> CalendarEvent? = { nil }
     private var notifyMeetingDetectedProvider: () -> Bool = { true }
-    private var notifyPreMeetingReminderProvider: () -> Bool = { true }
-    private var reminderMinutesProvider: () -> Int = { 3 }
-    private var micDismissed = false
+    private var escalatingProvider: () -> Bool = { true }
+    private var detectBrowserCallsProvider: () -> Bool = { true }
+    private var isMainWindowKeyProvider: () -> Bool = { false }
+    private var onCalendarChanged: () -> Void = {}
     private var meetingEndDetector: MeetingEndDetector?
 
-    /// Prevents sending repeated system notifications for the same detected call.
-    private var notificationPosted = false
-
-    /// Event IDs for which we've already scheduled a pre-meeting reminder.
-    private var scheduledReminderIDs: Set<String> = []
-
-    /// Notification category and action identifiers.
-    nonisolated static let meetingDetectedCategory = "MEETING_DETECTED"
-    nonisolated static let meetingDetectedIdentifier = "meeting-detected"
-    nonisolated static let startRecordingAction = "START_RECORDING"
-
-    /// Pre-meeting reminder category and actions.
-    nonisolated static let meetingReminderCategory = "MEETING_REMINDER"
-    nonisolated static let startListeningAction = "START_LISTENING"
-    nonisolated static let joinAndRecordAction = "JOIN_AND_RECORD"
-
-    init(calendar: any CalendarService) {
+    init(calendar: any CalendarService, notifications: NotificationManager) {
         self.calendar = calendar
+        self.notifications = notifications
     }
 
-    /// Caller injects a closure so the coordinator stays decoupled from
-    /// `RecordingController`'s identity / lifecycle.
-    func setIsRecordingProvider(_ provider: @escaping () -> Bool) {
-        self.isRecordingProvider = provider
-    }
+    // MARK: - Wiring
 
-    /// Inject a provider that returns the calendar event linked to the current
-    /// recording, if any. Used for auto-end detection.
-    func setActiveEventProvider(_ provider: @escaping () -> CalendarEvent?) {
-        self.activeEventProvider = provider
-    }
-
-    /// Inject the meeting end detector for multi-signal end detection.
-    func setMeetingEndDetector(_ detector: MeetingEndDetector) {
-        self.meetingEndDetector = detector
-    }
-
-    /// Inject notification preference providers so the coordinator respects
-    /// user settings without a direct dependency on AppEnvironment.
-    func setNotificationProviders(
-        meetingDetected: @escaping () -> Bool,
-        preMeetingReminder: @escaping () -> Bool,
-        reminderMinutes: @escaping () -> Int
+    /// Caller injects closures so the coordinator stays decoupled from
+    /// `RecordingSessionService` / `AppEnvironment`.
+    func configure(
+        isRecording: @escaping () -> Bool,
+        activeEvent: @escaping () -> CalendarEvent?,
+        meetingEndDetector: MeetingEndDetector,
+        notifyMeetingDetected: @escaping () -> Bool,
+        escalatingReminders: @escaping () -> Bool,
+        detectBrowserCalls: @escaping () -> Bool,
+        isMainWindowKey: @escaping () -> Bool,
+        onCalendarChanged: @escaping () -> Void
     ) {
-        self.notifyMeetingDetectedProvider = meetingDetected
-        self.notifyPreMeetingReminderProvider = preMeetingReminder
-        self.reminderMinutesProvider = reminderMinutes
+        isRecordingProvider = isRecording
+        activeEventProvider = activeEvent
+        self.meetingEndDetector = meetingEndDetector
+        notifyMeetingDetectedProvider = notifyMeetingDetected
+        escalatingProvider = escalatingReminders
+        detectBrowserCallsProvider = detectBrowserCalls
+        isMainWindowKeyProvider = isMainWindowKey
+        self.onCalendarChanged = onCalendarChanged
     }
 
     func start() {
-        stop()
+        guard !started else { return }
+        started = true
+
         pollingTask = Task { [weak self] in
             while !Task.isCancelled {
-                await self?.recompute()
-                await self?.scheduleUpcomingReminders()
+                await self?.refreshEvents()
+                await self?.recomputeSuggestion()
                 self?.recomputeMeetingEnd()
-                await self?.pollMeetingAppActivity()
                 try? await Task.sleep(for: .seconds(15))
             }
         }
         let stream = calendar.events
         streamTask = Task { [weak self] in
             for await _ in stream {
-                await self?.recompute()
+                await self?.refreshEvents()
+                await self?.recomputeSuggestion()
+                self?.onCalendarChanged()
             }
         }
 
-        // Start mic activity monitoring.
         micMonitor.start()
-        let micStream = micMonitor.isActive
+        let snapshots = micMonitor.snapshots
         micMonitorTask = Task { [weak self] in
-            for await active in micStream {
-                self?.handleMicActivity(active)
+            for await snapshot in snapshots {
+                self?.handleMicSnapshot(snapshot)
             }
         }
     }
 
-    func stop() {
-        pollingTask?.cancel(); pollingTask = nil
-        streamTask?.cancel(); streamTask = nil
-        micMonitorTask?.cancel(); micMonitorTask = nil
-        meetingEndTask?.cancel(); meetingEndTask = nil
-        micMonitor.stop()
-    }
+    // MARK: - User actions
 
     func dismiss(_ event: CalendarEvent) {
         dismissalExpiries[event.id] = event.endDate
         currentSuggestion = nil
     }
 
+    /// "Not a meeting" — stop reminding for the rest of this call.
+    func notAMeeting(sessionID: UUID? = nil) {
+        feed(.notAMeeting(sessionID: sessionID))
+    }
+
+    /// Silence reminders for 10 minutes.
+    func snooze(sessionID: UUID? = nil) {
+        feed(.snooze(sessionID: sessionID))
+    }
+
+    /// In-app banner dismiss button.
     func dismissMicSuggestion() {
-        micActiveSuggestion = false
-        micDismissed = true
-        // Leave `notificationPosted` true — dismissing silences the reminder
-        // for the rest of this call; it resets when the call ends.
-        removeMeetingDetectedNotification()
+        notAMeeting()
     }
 
     func dismissMeetingEnd() {
         meetingEndSuggestion = false
         meetingEndReason = ""
         meetingEndDetector?.dismiss()
+        notifications.removeMeetingEndSuggestion()
     }
 
-    /// Called when a recording starts — resets per-session state.
+    // MARK: - Recording lifecycle (called by RecordingSessionService)
+
     func recordingDidStart() {
-        micActiveSuggestion = false
-        micDismissed = false
-        meetingEndSuggestion = false
-        notificationPosted = false
-        // Recording is underway — the reminder has served its purpose.
-        removeMeetingDetectedNotification()
+        currentSuggestion = nil
+        feed(.recordingStarted)
     }
 
-    /// Called when a recording stops — resets per-session state.
     func recordingDidStop() {
         meetingEndSuggestion = false
-        micDismissed = false
-        notificationPosted = false
+        meetingEndReason = ""
+        feed(.recordingStopped)
     }
 
-    // MARK: - Calendar suggestion (existing)
+    func recordingFailed() {
+        feed(.recordingFailed)
+    }
 
-    private func recompute() async {
+    /// Re-fetches events and returns the event to link a one-click
+    /// recording to: the current call's match, else whatever is on the
+    /// calendar right now.
+    func bestCurrentEvent() async -> CalendarEvent? {
+        await refreshEvents()
+        return matchedEvent ?? CurrentEventMatcher.bestMatch(events: cachedEvents, now: Date())
+    }
+
+    /// An in-progress or imminent event with a join link (for "Join & Record").
+    var joinableEvent: CalendarEvent? {
+        let candidate = matchedEvent ?? CurrentEventMatcher.bestMatch(events: cachedEvents, now: Date())
+        return candidate?.hasMeetingLink == true ? candidate : nil
+    }
+
+    // MARK: - Calendar suggestion
+
+    private func refreshEvents() async {
+        cachedEvents = await calendar.upcomingEvents(within: 12 * 60 * 60)
+        updateMatchedEvent()
+    }
+
+    private func updateMatchedEvent() {
+        guard let call = currentCall else { matchedEvent = nil; return }
+        let hint = MeetingAppCatalog.app(withID: call.client.appID)?.platform
+        matchedEvent = CurrentEventMatcher.bestMatch(events: cachedEvents, now: Date(), platformHint: hint)
+    }
+
+    private func recomputeSuggestion() async {
         prune()
 
         guard CalendarPreferences.shared.bannerEnabled,
               !isRecordingProvider()
         else { currentSuggestion = nil; return }
 
-        guard let ev = await calendar.currentOrNextEvent(),
-              ev.startDate <= Date().addingTimeInterval(5 * 60),
-              ev.endDate > Date(),
+        let now = Date()
+        guard let ev = cachedEvents.first(where: { $0.endDate > now }),
+              ev.startDate <= now.addingTimeInterval(5 * 60),
               dismissalExpiries[ev.id] == nil
         else { currentSuggestion = nil; return }
 
-        // Show if the event has a Teams URL, or if a meeting app is currently running.
-        if ev.hasTeamsURL || isMeetingAppRunning() {
-            currentSuggestion = ev
-        } else {
-            currentSuggestion = nil
-        }
+        // Show if the event has a join link, or if a meeting app is currently running.
+        currentSuggestion = (ev.hasMeetingLink || runningCallApp() != nil) ? ev : nil
     }
 
-    /// Known meeting app bundle IDs mapped to display names.
-    /// Only dedicated meeting apps — browsers are excluded because they run all day.
-    private static let meetingApps: [String: String] = [
-        "com.microsoft.teams": "Microsoft Teams",
-        "com.microsoft.teams2": "Microsoft Teams",
-        "us.zoom.xos": "Zoom",
-        "us.zoom.videomeeting": "Zoom",
-        "com.webex.meetingmanager": "Webex",
-        "com.cisco.webexmeetingsapp": "Webex",
-    ]
-
-    /// Returns true if any known meeting app is currently running.
-    private func isMeetingAppRunning() -> Bool {
-        runningMeetingAppName() != nil
-    }
-
-    /// Returns the display name of the first running meeting app found, or nil.
-    private func runningMeetingAppName() -> String? {
-        let runningApps = NSWorkspace.shared.runningApplications
-        for app in runningApps {
-            if let bid = app.bundleIdentifier,
-               let name = Self.meetingApps[bid],
-               !app.isTerminated {
-                return name
-            }
-        }
-        return nil
+    private func runningCallApp() -> MeetingApp? {
+        MeetingAppCatalog.runningCallApp(
+            in: NSWorkspace.shared.runningApplications
+                .filter { !$0.isTerminated }
+                .map { (bundleID: $0.bundleIdentifier, name: $0.localizedName) }
+        )
     }
 
     private func prune() {
@@ -231,236 +235,96 @@ final class BannerCoordinator {
         dismissalExpiries = dismissalExpiries.filter { $0.value > now }
     }
 
-    // MARK: - Mic activity detection
+    // MARK: - Call detection
 
-    private func handleMicActivity(_ active: Bool) {
-        if active && !isRecordingProvider() && !micDismissed {
-            // Detect which app is using the mic.
-            micActiveAppName = runningMeetingAppName()
+    private func handleMicSnapshot(_ snapshot: MicUsageSnapshot) {
+        feed(.mic(classify(snapshot)))
+    }
 
-            // Try to find a current calendar event to show its title.
+    /// Turns raw mic users into the clients call detection cares about.
+    private func classify(_ snapshot: MicUsageSnapshot) -> [CallClient] {
+        guard snapshot.processListAvailable else {
+            // Fallback: device-level signal only. Our own recording also
+            // keeps the device running, so ignore it while recording.
+            guard snapshot.defaultDeviceRunningSomewhere, !isRecordingProvider() else { return [] }
+            if let app = runningCallApp() {
+                return [CallClient(appID: app.id, appName: app.displayName, kind: .call)]
+            }
+            return [CallClient(appID: "unknown", appName: nil, kind: .browser)]
+        }
+
+        let inCalendarEvent = CurrentEventMatcher.bestMatch(events: cachedEvents, now: Date(), earlyJoin: 5 * 60) != nil
+        var clients: [CallClient] = []
+        for mic in snapshot.clients {
+            let app = MeetingAppCatalog.classify(bundleID: mic.bundleID, processName: mic.processName)
+            switch app?.kind {
+            case .ignored:
+                continue
+            case .call:
+                clients.append(CallClient(appID: app!.id, appName: app!.displayName, kind: .call))
+            case .browser:
+                guard detectBrowserCallsProvider() else { continue }
+                clients.append(CallClient(appID: app!.id, appName: app!.displayName, kind: .browser))
+            case nil:
+                // Unknown app using the mic: only a call if the calendar says
+                // you're in a meeting right now.
+                guard inCalendarEvent else { continue }
+                let name = NSRunningApplication(processIdentifier: mic.pid)?.localizedName ?? mic.processName
+                clients.append(CallClient(appID: mic.bundleID ?? mic.processName ?? "pid-\(mic.pid)", appName: name, kind: .browser))
+            }
+        }
+        var seen = Set<String>()
+        return clients.filter { seen.insert($0.appID).inserted }
+    }
+
+    private func feed(_ input: CallInput) {
+        machine.config.schedule = escalatingProvider() ? .escalating : .once
+        let effects = machine.handle(input, now: Date())
+        let previousCallID = currentCall?.id
+        currentCall = machine.currentSession
+        unrecordedCall = machine.unrecordedSession
+        if currentCall?.id != previousCallID { updateMatchedEvent() }
+        for effect in effects { perform(effect) }
+        scheduleTick()
+    }
+
+    private func perform(_ effect: CallEffect) {
+        switch effect {
+        case .sessionStarted(let session):
+            print("[CallDetection] call started: \(session.client.appName ?? session.client.appID)")
+            Task { await self.refreshEvents() }
+        case .postReminder(let session, let attempt):
+            guard notifyMeetingDetectedProvider() else { return }
+            let event = matchedEvent
             Task {
-                var title: String?
-                if let ev = await calendar.currentOrNextEvent(),
-                   ev.startDate <= Date().addingTimeInterval(5 * 60),
-                   ev.endDate > Date() {
-                    title = ev.title
-                }
-                micEventTitle = title
-
-                // Post system notification so user sees it even if window is hidden.
-                if !notificationPosted {
-                    notificationPosted = true
-                    await postMeetingDetectedNotification(eventTitle: title, appName: micActiveAppName)
-                }
+                await notifications.postCallReminder(
+                    session: session, attempt: attempt,
+                    eventTitle: event?.title, eventID: event?.id
+                )
             }
-            micActiveSuggestion = true
-        } else if !active {
-            // Mic went silent. If a meeting app is still running, keep the
-            // banner visible — the mic may toggle during a call (mute/unmute).
-            // Only clear if no meeting app is running.
-            if !isMeetingAppRunning() {
-                micActiveSuggestion = false
-                micEventTitle = nil
-                micActiveAppName = nil
-                // Call ended — clear the sticky reminder and reset per-call
-                // state so the next call gets a fresh banner + notification.
-                micDismissed = false
-                notificationPosted = false
-                removeMeetingDetectedNotification()
+        case .removeReminder:
+            notifications.removeCallReminder()
+        case .sessionEnded(let session, let wasRecording):
+            print("[CallDetection] call ended: \(session.client.appName ?? session.client.appID)")
+            notifications.removeCallReminder()
+            if wasRecording {
+                meetingEndDetector?.callAppReleasedMic(appName: session.client.appName)
+                recomputeMeetingEnd()
             }
         }
     }
 
-    // MARK: - Meeting app polling
-
-    /// Periodically checks whether a meeting app is running. Triggers when:
-    /// 1. A meeting app is running during a calendar event window, OR
-    /// 2. A meeting app is running AND the microphone is actively in use
-    ///    (catches impromptu calls with no calendar event).
-    private func pollMeetingAppActivity() async {
-        guard !isRecordingProvider() else { return }
-
-        // Check if a meeting app is running.
-        guard let appName = runningMeetingAppName() else {
-            // Call ended — clear the sticky reminder and reset per-call state
-            // so the next call gets a fresh banner + notification.
-            micDismissed = false
-            notificationPosted = false
-            removeMeetingDetectedNotification()
-            return
+    /// Wake up when the machine's next deadline (debounce, reminder, end
+    /// grace) is due.
+    private func scheduleTick() {
+        tickTask?.cancel()
+        guard let deadline = machine.nextDeadline else { return }
+        let delay = max(0.05, deadline.timeIntervalSinceNow)
+        tickTask = Task { [weak self] in
+            try? await Task.sleep(for: .seconds(delay))
+            guard !Task.isCancelled else { return }
+            self?.feed(.tick)
         }
-
-        // User dismissed the suggestion — stay silent for the rest of this call.
-        guard !micDismissed else { return }
-
-        // Check for a calendar event in progress or about to start.
-        let ev: CalendarEvent?
-        if let candidate = await calendar.currentOrNextEvent(),
-           candidate.startDate <= Date().addingTimeInterval(5 * 60),
-           candidate.endDate > Date() {
-            ev = candidate
-        } else {
-            ev = nil
-        }
-
-        // If no calendar event, check if the mic is actively in use.
-        // A meeting app running + mic active = strong signal of an actual call,
-        // even without a calendar event (handles impromptu/ad-hoc calls).
-        let micRunning = micMonitor.isMicCurrentlyRunning
-        guard ev != nil || micRunning else {
-            // Meeting app is open but no call evidence — don't spam.
-            return
-        }
-
-        // Post a system notification even if an in-app banner is already
-        // visible — the app window may be hidden during the call.
-        if !notificationPosted {
-            notificationPosted = true
-            await postMeetingDetectedNotification(eventTitle: ev?.title, appName: appName)
-        }
-
-        // Already showing a calendar-based suggestion or mic banner — leave it.
-        if currentSuggestion != nil || micActiveSuggestion { return }
-
-        // A meeting app is running with call evidence — show the mic banner.
-        micActiveAppName = appName
-        micEventTitle = ev?.title
-        micActiveSuggestion = true
-    }
-
-    // MARK: - Pre-meeting reminders
-
-    /// Schedule reminder notifications for upcoming calendar events. Skips
-    /// events we've already scheduled, events that have already started, and
-    /// events starting more than 1 hour out.
-    private func scheduleUpcomingReminders() async {
-        guard notifyPreMeetingReminderProvider(),
-              CalendarPreferences.shared.bannerEnabled else { return }
-        let reminderLeadTime = TimeInterval(reminderMinutesProvider() * 60)
-        let events = await calendar.upcomingEvents(within: 60 * 60)
-        let now = Date()
-        let center = UNUserNotificationCenter.current()
-
-        for event in events {
-            guard !scheduledReminderIDs.contains(event.id) else { continue }
-
-            let fireDate = event.startDate.addingTimeInterval(-reminderLeadTime)
-            // Only schedule if the fire date is in the future.
-            guard fireDate > now else { continue }
-
-            let content = UNMutableNotificationContent()
-            content.title = event.title
-            let minutesUntil = Int(ceil(reminderLeadTime / 60))
-            content.body = "Starting in \(minutesUntil) minute\(minutesUntil == 1 ? "" : "s")"
-            content.sound = .default
-
-            if event.hasTeamsURL {
-                content.categoryIdentifier = Self.meetingReminderCategory + "_TEAMS"
-                // Store the Teams URL so the action handler can open it.
-                content.userInfo = ["teamsURL": event.teamsJoinURL!.absoluteString,
-                                    "eventID": event.id]
-            } else {
-                content.categoryIdentifier = Self.meetingReminderCategory
-                content.userInfo = ["eventID": event.id]
-            }
-
-            let interval = fireDate.timeIntervalSince(now)
-            let trigger = UNTimeIntervalNotificationTrigger(timeInterval: max(interval, 1), repeats: false)
-            let request = UNNotificationRequest(
-                identifier: "meeting-reminder-\(event.id)",
-                content: content,
-                trigger: trigger
-            )
-
-            try? await center.add(request)
-            scheduledReminderIDs.insert(event.id)
-        }
-    }
-
-    // MARK: - System notifications
-
-    /// Register notification categories with action buttons.
-    /// Call once at app launch.
-    static func registerNotificationCategory() {
-        let startAction = UNNotificationAction(
-            identifier: startRecordingAction,
-            title: "Start Recording",
-            options: [.foreground]
-        )
-        let detectedCategory = UNNotificationCategory(
-            identifier: meetingDetectedCategory,
-            actions: [startAction],
-            intentIdentifiers: [],
-            options: []
-        )
-
-        // Pre-meeting reminder: "Start Listening" only (no Teams URL).
-        let listenAction = UNNotificationAction(
-            identifier: startListeningAction,
-            title: "Start Listening",
-            options: [.foreground]
-        )
-        let reminderCategory = UNNotificationCategory(
-            identifier: meetingReminderCategory,
-            actions: [listenAction],
-            intentIdentifiers: [],
-            options: []
-        )
-
-        // Pre-meeting reminder with Teams: "Join & Record" + "Start Listening".
-        let joinAction = UNNotificationAction(
-            identifier: joinAndRecordAction,
-            title: "Join & Record",
-            options: [.foreground]
-        )
-        let reminderTeamsCategory = UNNotificationCategory(
-            identifier: meetingReminderCategory + "_TEAMS",
-            actions: [joinAction, listenAction],
-            intentIdentifiers: [],
-            options: []
-        )
-
-        UNUserNotificationCenter.current().setNotificationCategories([
-            detectedCategory, reminderCategory, reminderTeamsCategory,
-        ])
-    }
-
-    /// Post a macOS system notification alerting the user that a meeting was detected.
-    private func postMeetingDetectedNotification(eventTitle: String?, appName: String? = nil) async {
-        guard notifyMeetingDetectedProvider() else { return }
-        let center = UNUserNotificationCenter.current()
-        let granted = (try? await center.requestAuthorization(options: [.alert, .sound])) ?? false
-        guard granted else { return }
-
-        let content = UNMutableNotificationContent()
-        if let title = eventTitle {
-            content.title = "Meeting Detected"
-            content.body = "\"\(title)\" — would you like to start recording?"
-        } else if let app = appName {
-            content.title = "Call Detected"
-            content.body = "\(app) is using the microphone. Would you like to start recording?"
-        } else {
-            content.title = "Call Detected"
-            content.body = "A meeting app is active. Would you like to start recording?"
-        }
-        content.sound = .default
-        content.categoryIdentifier = Self.meetingDetectedCategory
-
-        let request = UNNotificationRequest(
-            identifier: Self.meetingDetectedIdentifier,
-            content: content,
-            trigger: nil
-        )
-        try? await center.add(request)
-    }
-
-    /// Clear the sticky "meeting detected" notification from Notification
-    /// Center — called once recording starts, the call ends, or the user
-    /// dismisses the suggestion.
-    private func removeMeetingDetectedNotification() {
-        UNUserNotificationCenter.current()
-            .removeDeliveredNotifications(withIdentifiers: [Self.meetingDetectedIdentifier])
     }
 
     // MARK: - Meeting end detection
@@ -473,13 +337,17 @@ final class BannerCoordinator {
         }
 
         // Forward calendar event to the detector for time-based check.
-        let event = activeEventProvider()
-        meetingEndDetector?.checkCalendarEnd(event: event)
+        meetingEndDetector?.checkCalendarEnd(event: activeEventProvider())
 
         // Mirror the detector's combined decision (silence + calendar + app exit).
-        if let detector = meetingEndDetector, detector.shouldSuggestEnd {
+        if let detector = meetingEndDetector, detector.shouldSuggestEnd, !meetingEndSuggestion {
             meetingEndSuggestion = true
             meetingEndReason = detector.endReason
+            // The in-app banner is invisible if the window isn't in front.
+            if !isMainWindowKeyProvider() {
+                let reason = detector.endReason
+                Task { await notifications.postMeetingEndSuggestion(reason: reason) }
+            }
         }
     }
 }

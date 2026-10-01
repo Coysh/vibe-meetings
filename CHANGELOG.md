@@ -6,6 +6,27 @@ Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 versioned with [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
+### Added
+- Escalating "you're in a call and not recording" reminders: immediately, again after 2 and 5 minutes, then every 5 minutes until you record, snooze or choose "Not a meeting". Only one reminder is ever shown in Notification Center. Toggle in Settings → Notifications
+- **Record** on the call reminder starts recording instantly in the background, linked to the matching calendar event (or titled e.g. "Zoom call 14:05"). Also **Snooze 10 min** and **Not a meeting**; clicking the notification opens the start sheet
+- Floating recording indicator: a small draggable pill on every Space (including over full-screen calls). It shows "Not recording · Record" during a call, and a timer with Stop while recording
+- Menu bar icon with recording state, Record Now / Stop, Join & Record, Snooze and Not a meeting. Works with the main window closed
+- "Starting now" notification for online meetings, and Join & Record for Zoom, Google Meet and Webex links as well as Teams
+- Call detection for Slack, FaceTime, Discord, WhatsApp, Signal, Skype and browser-based calls (Google Meet, Teams on the web). Browser detection can be turned off
+- "Meeting may have ended" notification with a Stop Recording button when the app window isn't in front. The meeting app releasing the microphone is now an end-of-meeting signal
+- Settings warns when notifications are set to disappear after a few seconds ("Temporary"), with a button that opens the right System Settings pane. It also has a test call reminder
+- New installs default to persistent (Alert-style) notifications
+
+### Fixed
+- Calls weren't detected after switching microphones (AirPods, a headset) while the app was running. Detection now covers every input device and identifies which app is using the microphone
+- Notification buttons did nothing when the main window was closed, and were lost if the notification relaunched the app
+- Pre-meeting reminders fired at the old time for moved events, and still fired for cancelled ones. They now follow calendar changes
+- Call detection and calendar reminders only started once the main window had appeared
+
+### Changed
+- Closing the main window no longer stops call detection; the app keeps running in the menu bar / Dock
+- The in-app "call detected" and calendar banners start recording immediately instead of opening the start sheet
+- Meetings recorded from Zoom, Google Meet or Webex events store that platform. Versions 1.6.6 and earlier can't read these meetings, so update every Mac that shares the meetings folder
 
 ## [1.6.6] - 2026-08-17
 - All-day calendar events are now ignored by call detection — they no longer shadow real meetings, trigger suggestion banners, or schedule pre-meeting reminders

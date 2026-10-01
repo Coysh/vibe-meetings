@@ -49,8 +49,14 @@ targets:
         NSHumanReadableCopyright: "© 2026"
         NSMicrophoneUsageDescription: "vibe-meetings records your microphone so it can transcribe what you say. Audio never leaves your Mac."
         NSAudioCaptureUsageDescription: "vibe-meetings captures system audio (the other side of the call) so it can transcribe what others say. Audio never leaves your Mac."
-        NSCalendarsUsageDescription: "vibe-meetings reads your calendar to detect Teams meetings and offer to start recording them. Calendar data never leaves your Mac."
-        NSCalendarsFullAccessUsageDescription: "vibe-meetings reads your calendar to detect Teams meetings and offer to start recording them. Calendar data never leaves your Mac."
+        NSCalendarsUsageDescription: "vibe-meetings reads your calendar to detect online meetings and remind you to record them. Calendar data never leaves your Mac."
+        NSCalendarsFullAccessUsageDescription: "vibe-meetings reads your calendar to detect online meetings and remind you to record them. Calendar data never leaves your Mac."
+        # Default new installs to persistent "Alerts" so "not recording"
+        # reminders stay on screen until acted on.
+        NSUserNotificationAlertStyle: alert
+        # Sparkle — kept here so `xcodegen generate` doesn't drop them.
+        SUFeedURL: "https://raw.githubusercontent.com/Coysh/vibe-meetings/main/appcast.xml"
+        SUPublicEDKey: "AcvvTRk7Ksz3mOJeTrxAxAwShjoSbotUeMuCWEPMV7E="
     entitlements:
       path: VibeMeetings/VibeMeetings.entitlements
     settings:
