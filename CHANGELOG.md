@@ -6,6 +6,12 @@ Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 versioned with [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
+### Fixed
+- Settings → Calendar: checkboxes now update immediately when clicked, and long calendar lists are no longer cut off
+
+### Changed
+- The Settings window can be resized, and every tab scrolls
+- Calendars are grouped by account, with All / None buttons and a filter box
 
 ## [1.7.2] - 2026-10-01
 - 1.7.0 could freeze on launch (100% CPU) because of an endless update loop between the menu bar icon and its "Show in menu bar" setting

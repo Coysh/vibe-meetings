@@ -6,7 +6,11 @@ struct CalendarSettingsView: View {
     @Environment(AppEnvironment.self) private var env
     @State private var status: EKAuthorizationStatus = EKEventStore.authorizationStatus(for: .event)
     @State private var calendars: [CalendarSummary] = []
+    /// Local mirror of `CalendarPreferences.excludedCalendarIDs` so toggles
+    /// redraw immediately (UserDefaults isn't observable).
+    @State private var excluded: Set<String> = CalendarPreferences.shared.excludedCalendarIDs
     @State private var bannerEnabled: Bool = CalendarPreferences.shared.bannerEnabled
+    @State private var filter = ""
 
     var body: some View {
         Form {
@@ -29,36 +33,95 @@ struct CalendarSettingsView: View {
                 }
             }
 
-            Section("Calendars to watch") {
-                if calendars.isEmpty {
+            if calendars.isEmpty {
+                Section("Calendars to watch") {
                     Text("Grant access above to see your calendars.")
                         .foregroundStyle(.secondary)
                         .font(.caption)
-                } else {
-                    ForEach(calendars) { cal in
-                        Toggle(isOn: binding(for: cal)) {
-                            VStack(alignment: .leading) {
-                                Text(cal.title)
-                                Text(cal.sourceTitle).font(.caption2).foregroundStyle(.secondary)
+                }
+            } else {
+                Section {
+                    TextField("Filter calendars", text: $filter)
+                    Text("\(calendars.count - excluded.intersection(calendars.map(\.id)).count) of \(calendars.count) calendars watched for meetings and reminders.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                } header: {
+                    Text("Calendars to watch")
+                }
+
+                ForEach(accounts, id: \.self) { account in
+                    let cals = visibleCalendars(in: account)
+                    if !cals.isEmpty {
+                        Section {
+                            ForEach(cals) { cal in
+                                Toggle(cal.title, isOn: binding(for: cal))
                             }
+                        } header: {
+                            HStack {
+                                Text(account)
+                                Spacer()
+                                Button("All") { setAll(cals, enabled: true) }
+                                Button("None") { setAll(cals, enabled: false) }
+                            }
+                            .buttonStyle(.link)
+                            .font(.caption)
                         }
                     }
                 }
             }
 
             Section("Banner") {
-                Toggle("Show Teams meeting banner", isOn: $bannerEnabled)
+                Toggle("Show meeting banner and calendar reminders", isOn: $bannerEnabled)
                     .onChange(of: bannerEnabled) { _, v in
                         CalendarPreferences.shared.bannerEnabled = v
+                        env.eventReminders.setNeedsReconcile()
                     }
-                Text("When a Teams meeting from your calendar is starting, show a one-click banner offering to start recording. The app never auto-starts recordings.")
+                Text("When an online meeting from your calendar is starting, show a one-click banner offering to start recording. The app never auto-starts recordings.")
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }
         }
-        .padding()
+        .formStyle(.grouped)
         .task { await reloadCalendars() }
     }
+
+    // MARK: - Calendars
+
+    /// Account names (iCloud, Exchange, Google…), alphabetical.
+    private var accounts: [String] {
+        Array(Set(calendars.map(\.sourceTitle))).sorted { $0.localizedStandardCompare($1) == .orderedAscending }
+    }
+
+    private func visibleCalendars(in account: String) -> [CalendarSummary] {
+        let query = filter.trimmingCharacters(in: .whitespaces)
+        return calendars
+            .filter { $0.sourceTitle == account }
+            .filter { query.isEmpty || $0.title.localizedCaseInsensitiveContains(query) || account.localizedCaseInsensitiveContains(query) }
+            .sorted { $0.title.localizedStandardCompare($1.title) == .orderedAscending }
+    }
+
+    private func reloadCalendars() async {
+        calendars = await env.calendarService.allCalendars()
+        excluded = CalendarPreferences.shared.excludedCalendarIDs
+    }
+
+    private func binding(for cal: CalendarSummary) -> Binding<Bool> {
+        Binding(
+            get: { !excluded.contains(cal.id) },
+            set: { enabled in setAll([cal], enabled: enabled) }
+        )
+    }
+
+    private func setAll(_ cals: [CalendarSummary], enabled: Bool) {
+        for cal in cals {
+            if enabled { excluded.remove(cal.id) } else { excluded.insert(cal.id) }
+        }
+        CalendarPreferences.shared.excludedCalendarIDs = excluded
+        // Reminders for newly (un)watched calendars update straight away.
+        env.eventReminders.setNeedsReconcile()
+    }
+
+    // MARK: - Permission
 
     private var isGranted: Bool {
         if #available(macOS 14, *) { return status == .fullAccess }
@@ -75,20 +138,5 @@ struct CalendarSettingsView: View {
         case .authorized: return "Authorized"
         @unknown default: return "Unknown"
         }
-    }
-
-    private func reloadCalendars() async {
-        calendars = await env.calendarService.allCalendars()
-    }
-
-    private func binding(for cal: CalendarSummary) -> Binding<Bool> {
-        Binding(
-            get: { !env.calendarService.isExcluded(cal.id) },
-            set: { enabled in
-                Task {
-                    await env.calendarService.setExcluded(!enabled, for: cal.id)
-                }
-            }
-        )
     }
 }

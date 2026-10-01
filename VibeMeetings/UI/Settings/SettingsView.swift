@@ -16,7 +16,9 @@ struct SettingsView: View {
             NotificationSettingsView().tabItem { Label("Notifications", systemImage: "bell") }
             PromptSettingsView().tabItem { Label("Prompts", systemImage: "text.quote") }
         }
-        .frame(width: 560, height: 540)
+        // Resizable (see `.windowResizability` on the Settings scene); every
+        // tab scrolls, so long lists like calendars are never cut off.
+        .frame(minWidth: 560, idealWidth: 600, minHeight: 480, idealHeight: 640)
     }
 }
 
@@ -181,7 +183,7 @@ private struct GeneralSettingsView: View {
                     .foregroundStyle(.secondary)
             }
         }
-        .padding()
+        .formStyle(.grouped)
     }
 }
 
@@ -351,7 +353,7 @@ private struct EngineSettingsView: View {
                     .foregroundStyle(.secondary)
             }
         }
-        .padding()
+        .formStyle(.grouped)
         .task {
             engineKind = type(of: env.activeTranscriptionEngine).kind
             ollamaURLString = env.ollamaBaseURL.absoluteString

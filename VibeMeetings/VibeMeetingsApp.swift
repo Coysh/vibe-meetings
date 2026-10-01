@@ -48,6 +48,7 @@ struct VibeMeetingsApp: App {
                     .environment(env)
             }
         }
+        .windowResizability(.contentMinSize)
 
         // Read-only binding: SwiftUI writes the status item's visibility back
         // through `isInserted` whenever AppKit/the system touches it. Feeding
