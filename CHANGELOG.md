@@ -6,12 +6,15 @@ Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 versioned with [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
-### Fixed
+
+## [1.7.3] - 2026-10-01
 - Settings → Calendar: checkboxes now update immediately when clicked, and long calendar lists are no longer cut off
 
 ### Changed
 - The Settings window can be resized, and every tab scrolls
 - Calendars are grouped by account, with All / None buttons and a filter box
+
+### Fixed
 
 ## [1.7.2] - 2026-10-01
 - 1.7.0 could freeze on launch (100% CPU) because of an endless update loop between the menu bar icon and its "Show in menu bar" setting
@@ -182,7 +185,8 @@ versioned with [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - Microphone device selection in Settings
 - Resume recording for existing meetings
 
-[Unreleased]: https://github.com/Coysh/vibe-meetings/compare/v1.7.2...HEAD
+[Unreleased]: https://github.com/Coysh/vibe-meetings/compare/v1.7.3...HEAD
+[1.7.3]: https://github.com/Coysh/vibe-meetings/compare/v1.7.0...v1.7.3
 [1.7.2]: https://github.com/Coysh/vibe-meetings/compare/v1.6.6...v1.7.2
 [1.7.0]: https://github.com/Coysh/vibe-meetings/compare/v1.6.5...v1.7.0
 [1.6.6]: https://github.com/Coysh/vibe-meetings/compare/v1.6.4...v1.6.6
