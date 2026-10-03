@@ -7,6 +7,39 @@ versioned with [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [1.8.0] - 2026-10-03
+- Resuming a meeting no longer deletes its audio: the earlier audio is kept as a backup file, and you are asked first
+### Added
+- Confirmation before replacing a summary, importing over a transcript, deleting a transcript line, and clearing chat. A failed summary keeps the previous one
+- **Speaker-echo cancellation.** If you take calls on speakers, your microphone hears the other people through the room and your side of the transcript came out garbled. Vibe Meetings now cancels that echo using the call audio as a reference (Settings → Recording → Speaker echo). It leaves headphones alone and never changes your saved recording
+- Errors saving notes, transcript edits, renames, moves and deletes are now shown instead of silently ignored
+- First-run setup that explains each permission before asking (microphone, system audio, transcription model download, calendar, notifications, summaries). Run it again from Settings → General
+- Editing a meeting no longer silently assigns an organisation; the title can be edited
+- Recording menu (Record / Stop with ⇧⌘R), New Folder (⇧⌘N), ⌘1–4 for the meeting tabs, ⌥⌘F to search meetings, ⌘G / ⇧⌘G to step through transcript matches, ⌥⌘I for chat, Space to play / pause audio
+- Organise no longer permanently hides skipped meetings, and no longer creates a second "People" folder tree
+- A Recording tab in Settings (microphone, echo, ending a recording, the floating indicator)
+- Chat history is kept when the chat panel is re-opened or switched
+- Rename "Others" to a real name for a meeting (right-click the speaker in the transcript)
+- An in-progress calendar meeting no longer disappears from Upcoming
+- Selecting a folder shows its meetings; playback speed control; Copy and Cancel for summaries; a Stop button for chat answers
+- Sheets that could have no way to close, a crash when two participants shared an id, and a sidebar multi-selection that opened an arbitrary meeting
+
+### Changed
+- Echo in the transcript is caught far more reliably: it is matched across several lines of the other side, tolerates garbled words, and trims echoed words out of lines where you were also talking
+- Recording now starts capturing audio immediately; the transcription model loads (or downloads, with progress) alongside instead of delaying the start
+- "Keep in current location" now really keeps the meeting where it is. Choices are Automatic, Keep where it is, or a folder
+- Dismissing "meeting may have ended" only quiets that one reason, for a while, instead of turning every end-of-meeting check off for the rest of the recording. The prompt also shows in the floating indicator and the menu
+- Settings reorganised; calendar and notification settings explain how they depend on each other
+- The app is called "Vibe Meetings" everywhere you see it
+
+### Fixed
+- Not capturing the other side of a call (system audio permission denied) is now shown clearly, with a button to fix it. It used to fail silently
+
+
+- Failed recording starts stay on screen with Try again / Open Settings instead of disappearing after 15 seconds
+- Changing the microphone during a recording now works with the main window closed
+
+
 ## [1.7.3] - 2026-10-01
 - Settings → Calendar: checkboxes now update immediately when clicked, and long calendar lists are no longer cut off
 
@@ -185,7 +218,8 @@ versioned with [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - Microphone device selection in Settings
 - Resume recording for existing meetings
 
-[Unreleased]: https://github.com/Coysh/vibe-meetings/compare/v1.7.3...HEAD
+[Unreleased]: https://github.com/Coysh/vibe-meetings/compare/v1.8.0...HEAD
+[1.8.0]: https://github.com/Coysh/vibe-meetings/compare/v1.7.2...v1.8.0
 [1.7.3]: https://github.com/Coysh/vibe-meetings/compare/v1.7.0...v1.7.3
 [1.7.2]: https://github.com/Coysh/vibe-meetings/compare/v1.6.6...v1.7.2
 [1.7.0]: https://github.com/Coysh/vibe-meetings/compare/v1.6.5...v1.7.0
