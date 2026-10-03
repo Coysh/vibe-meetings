@@ -90,4 +90,118 @@ final class EchoDedupTests: XCTestCase {
         let out = EchoDedup.suppress(segs)
         XCTAssertEqual(out.count, 1)
     }
+
+    // MARK: - Union / order-aware matching (v2)
+
+    /// The echo's text is split across three system segments because the two
+    /// channels are windowed independently. The single-segment rule missed this.
+    func testEchoSplitAcrossThreeSystemSegmentsDropped() {
+        let segs = [
+            system("we need to revisit the", 10.0, 11.5),
+            system("pricing model before the", 11.5, 13.0),
+            system("board meeting next week", 13.0, 14.5),
+            mic("revisit the pricing model before the board meeting", 11.0, 14.0)
+        ]
+        let out = EchoDedup.suppress(segs)
+        XCTAssertTrue(texts(out, .mic).isEmpty)
+    }
+
+    /// Mic and system segment boundaries drift by a few seconds.
+    func testBoundaryDriftStillCaught() {
+        let segs = [
+            system("the migration to the new platform finishes on thursday", 20.0, 24.0),
+            mic("migration to the new platform finishes on thursday", 22.5, 26.5)
+        ]
+        let out = EchoDedup.suppress(segs)
+        XCTAssertTrue(texts(out, .mic).isEmpty)
+    }
+
+    /// Reverb garbles a word ("deadlined"); one-letter slips still match.
+    func testReverbGarbledWordStillMatches() {
+        let segs = [
+            system("please move the deadline to the end of the month", 5.0, 8.0),
+            mic("please move the deadlined to the end of the month", 5.1, 8.1)
+        ]
+        XCTAssertTrue(texts(EchoDedup.suppress(segs), .mic).isEmpty)
+    }
+
+    /// The user talks over the tail of the other party: only the echoed span is
+    /// removed, the user's own words (and a sensible time range) survive.
+    func testMixedSegmentTrimmedKeepsUserWords() {
+        let segs = [
+            system("the quarterly numbers look strong this time", 30.0, 33.0),
+            mic("the quarterly numbers look strong this time and I disagree with the forecast", 30.0, 36.0)
+        ]
+        let out = EchoDedup.suppress(segs)
+        let kept = out.filter { $0.channel == .mic }
+        XCTAssertEqual(kept.count, 1)
+        XCTAssertEqual(kept[0].text, "and I disagree with the forecast")
+        XCTAssertGreaterThan(kept[0].start, 30.0, "start should move past the removed echo")
+        XCTAssertEqual(kept[0].end, 36.0, accuracy: 0.001)
+    }
+
+    /// Same words, reversed order: not an echo (the match is order-aware).
+    func testReversedOrderIsKept() {
+        let segs = [
+            system("alpha bravo charlie delta echo foxtrot", 40.0, 43.0),
+            mic("foxtrot echo delta charlie bravo alpha", 40.0, 43.0)
+        ]
+        XCTAssertEqual(texts(EchoDedup.suppress(segs), .mic).count, 1)
+    }
+
+    /// A one-word fragment that is a distinctive word the other party just said
+    /// is dropped; a backchannel "yeah" never is.
+    func testOneWordFragments() {
+        let segs = [
+            system("we are over the budget again", 50.0, 52.0),
+            mic("budget", 50.8, 51.2),
+            mic("yeah", 51.5, 51.8)
+        ]
+        let kept = texts(EchoDedup.suppress(segs), .mic)
+        XCTAssertEqual(kept, ["yeah"])
+    }
+
+    /// The user quoting a short phrase a few seconds *later* is not echo.
+    func testUserQuotingPhraseLaterIsKept() {
+        let segs = [
+            system("the contract renewal is due friday", 60.0, 62.0),
+            mic("so the contract renewal is due friday", 66.5, 68.5)
+        ]
+        XCTAssertEqual(texts(EchoDedup.suppress(segs), .mic).count, 1)
+    }
+
+    /// Overlap made only of function words is never enough.
+    func testFunctionWordOnlyOverlapKept() {
+        let segs = [
+            system("i think that we should", 70.0, 72.0),
+            mic("i think that we should", 70.0, 72.0)
+        ]
+        XCTAssertEqual(texts(EchoDedup.suppress(segs), .mic).count, 1)
+    }
+
+    /// `.conservative` is the original single-segment behaviour: echo split across
+    /// several system segments is *not* caught.
+    func testConservativeConfigKeepsOldBehaviour() {
+        let segs = [
+            system("we need to revisit the", 10.0, 11.5),
+            system("pricing model before the", 11.5, 13.0),
+            system("board meeting next week", 13.0, 14.5),
+            mic("revisit the pricing model before the board meeting", 11.0, 14.0)
+        ]
+        XCTAssertEqual(texts(EchoDedup.suppress(segs, config: .conservative), .mic).count, 1)
+    }
+
+    /// 500 segments must stay cheap — this runs on every live transcript update.
+    func testPerformanceOnLongMeeting() {
+        var segs: [TranscriptSegment] = []
+        for i in 0..<250 {
+            let t = Double(i) * 6
+            segs.append(system("segment \(i) discusses topic alpha beta gamma delta epsilon zeta", t, t + 5))
+            segs.append(mic("my own reply number \(i) about something entirely different here", t + 0.5, t + 5))
+        }
+        let start = Date()
+        _ = EchoDedup.suppress(segs)
+        // Generous: debug builds are far slower than release.
+        XCTAssertLessThan(Date().timeIntervalSince(start), 1.0)
+    }
 }

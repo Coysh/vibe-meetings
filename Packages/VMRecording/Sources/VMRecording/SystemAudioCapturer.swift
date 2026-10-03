@@ -104,7 +104,14 @@ public final class SystemAudioCapturer: @unchecked Sendable {
         status = AudioDeviceCreateIOProcID(newAggID, { _, inNow, inInputData, inInputTime, _, _, clientData in
             guard let clientData else { return noErr }
             let me = Unmanaged<SystemAudioCapturer>.fromOpaque(clientData).takeUnretainedValue()
-            me.handle(bufferList: inInputData, hostTime: inNow.pointee.mHostTime, inputTime: inInputTime.pointee)
+            // `inInputTime` is when the captured samples began; `inNow` is merely
+            // when this callback ran (jittery). Use the former so the system
+            // timeline lines up with the mic's — essential for echo cancellation.
+            let inputTime = inInputTime.pointee
+            let hostTime = inputTime.mFlags.contains(.hostTimeValid)
+                ? inputTime.mHostTime
+                : inNow.pointee.mHostTime
+            me.handle(bufferList: inInputData, hostTime: hostTime, inputTime: inputTime)
             return noErr
         }, opaque, &procID)
         guard status == noErr, let procID else {

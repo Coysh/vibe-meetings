@@ -11,9 +11,20 @@ import VMCore
 /// time span.
 public final class SegmentMerger: @unchecked Sendable {
     private var segments: [TranscriptSegment] = []
+    private var echoConfig: EchoDedup.Config
     private let lock = NSLock()
 
-    public init() {}
+    public init(echoConfig: EchoDedup.Config = .default) {
+        self.echoConfig = echoConfig
+    }
+
+    /// Switch the echo-suppression strictness mid-recording (e.g. to
+    /// `.conservative` once acoustic cancellation reports the user is on
+    /// headphones and there is no echo path to catch).
+    public func setEchoConfig(_ config: EchoDedup.Config) {
+        lock.lock(); defer { lock.unlock() }
+        echoConfig = config
+    }
 
     /// Ingest a single segment from a streaming window.
     ///
@@ -57,16 +68,16 @@ public final class SegmentMerger: @unchecked Sendable {
     /// adjacent-duplicate collapsing applied, partial flags preserved so the
     /// "…" in-progress indicator still shows.
     public func displaySnapshot() -> [TranscriptSegment] {
-        lock.lock(); let segs = segments; lock.unlock()
-        return Self.clean(segs, promoteFinal: false)
+        lock.lock(); let segs = segments; let cfg = echoConfig; lock.unlock()
+        return Self.clean(segs, promoteFinal: false, echoConfig: cfg)
     }
 
     /// Cleaned, finalized transcript for persistence (checkpoint + stop):
     /// echo-deduped, adjacent duplicates collapsed, all partials promoted to
     /// final so a saved/recovered transcript reads cleanly.
     public func finalSnapshot() -> [TranscriptSegment] {
-        lock.lock(); let segs = segments; lock.unlock()
-        return Self.clean(segs, promoteFinal: true)
+        lock.lock(); let segs = segments; let cfg = echoConfig; lock.unlock()
+        return Self.clean(segs, promoteFinal: true, echoConfig: cfg)
     }
 
     public func finals() -> [TranscriptSegment] {
@@ -85,8 +96,12 @@ public final class SegmentMerger: @unchecked Sendable {
     /// pass is enough. Order of operations: echo-suppress (uses the clean system
     /// channel as reference), then collapse consecutive same-speaker duplicates
     /// that the overlapping sliding windows produced.
-    private static func clean(_ input: [TranscriptSegment], promoteFinal: Bool) -> [TranscriptSegment] {
-        var out = EchoDedup.suppress(input)
+    private static func clean(
+        _ input: [TranscriptSegment],
+        promoteFinal: Bool,
+        echoConfig: EchoDedup.Config
+    ) -> [TranscriptSegment] {
+        var out = EchoDedup.suppress(input, config: echoConfig)
         out = collapseAdjacentDuplicates(out)
         if promoteFinal {
             out = out.map { seg in

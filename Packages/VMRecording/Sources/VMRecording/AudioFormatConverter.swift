@@ -17,17 +17,17 @@ public final class AudioFormatConverter: @unchecked Sendable {
     }
 
     public func convert(_ buffer: AVAudioPCMBuffer) throws -> [Float] {
-        // Recreate the converter when the input format changes. We also call
-        // reset() before every conversion because AVAudioConverter's
-        // input-block API is stateful — after the block returns
-        // .endOfStream the converter won't call it again on subsequent
-        // convert() invocations unless reset.
+        // Recreate the converter only when the input format changes. We do NOT
+        // reset() per buffer and the input block returns `.noDataNow` once the
+        // buffer is consumed (never `.endOfStream`): that keeps the resampler's
+        // filter state continuous across buffers. Resetting every ~85 ms (mic)
+        // or ~10 ms (system tap) injects discontinuities that an adaptive echo
+        // canceller cannot model, and makes per-buffer output length vary.
         if inputFormat != buffer.format || converter == nil {
             inputFormat = buffer.format
             converter = AVAudioConverter(from: buffer.format, to: outputFormat)
         }
         guard let converter else { return [] }
-        converter.reset()
 
         // Capacity at the new sample rate, with a small slack.
         let ratio = outputFormat.sampleRate / buffer.format.sampleRate
@@ -38,7 +38,7 @@ public final class AudioFormatConverter: @unchecked Sendable {
         var error: NSError?
         let status = converter.convert(to: out, error: &error) { _, status in
             if consumed {
-                status.pointee = .endOfStream
+                status.pointee = .noDataNow
                 return nil
             }
             consumed = true

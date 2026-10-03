@@ -295,16 +295,18 @@ final class AudioFormatConverter48kMono {
             converter = AVAudioConverter(from: buffer.format, to: outputFormat)
         }
         guard let converter else { return [] }
-        converter.reset()
 
         let ratio = outputFormat.sampleRate / buffer.format.sampleRate
         let capacity = AVAudioFrameCount(Double(buffer.frameLength) * ratio + 16)
         guard let out = AVAudioPCMBuffer(pcmFormat: outputFormat, frameCapacity: capacity) else { return [] }
 
+        // Deliberately no `reset()` and `.noDataNow` (not `.endOfStream`) once
+        // the buffer is consumed: the resampler keeps its filter history across
+        // buffers, so there is no discontinuity at every buffer boundary.
         var consumed = false
         var error: NSError?
         let status = converter.convert(to: out, error: &error) { _, status in
-            if consumed { status.pointee = .endOfStream; return nil }
+            if consumed { status.pointee = .noDataNow; return nil }
             consumed = true
             status.pointee = .haveData
             return buffer
