@@ -9,7 +9,7 @@ struct AboutView: View {
                     .frame(width: 96, height: 96)
             }
 
-            Text("vibe-meetings")
+            Text("Vibe Meetings")
                 .font(.title.bold())
 
             if let version = Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String,
@@ -26,7 +26,7 @@ struct AboutView: View {
                     .frame(maxWidth: .infinity)
             }
 
-            Text("Records, transcribes, and summarises meetings 100% locally on your Mac. System audio and microphone are captured as separate streams, transcribed on-device via WhisperKit, and summarised by your own Ollama instance or OpenAI. No data ever leaves your Mac unless you opt in to OpenAI.")
+            Text("Records, transcribes, and summarises meetings 100% locally on your Mac. System audio and microphone are captured as separate streams, transcribed on-device via WhisperKit, and summarised by your own Ollama instance or OpenAI. Your recordings and transcripts stay on your Mac unless you choose OpenAI for summaries (or point Ollama at another machine). The app does use the network to download transcription models and to check for updates.")
                 .font(.caption)
                 .foregroundStyle(.secondary)
                 .multilineTextAlignment(.center)
@@ -38,6 +38,7 @@ struct AboutView: View {
                     .font(.caption.bold())
 
                 packageRow("WhisperKit", by: "Argmax", url: "https://github.com/argmaxinc/WhisperKit")
+                packageRow("SpeexDSP (echo cancellation)", by: "Xiph.Org Foundation, BSD licence", url: "https://github.com/xiph/speexdsp")
                 packageRow("Sparkle", by: "Sparkle Project", url: "https://github.com/sparkle-project/Sparkle")
                 packageRow("Swift Transformers", by: "Hugging Face", url: "https://github.com/huggingface/swift-transformers")
                 packageRow("Swift Argument Parser", by: "Apple", url: "https://github.com/apple/swift-argument-parser")
@@ -53,7 +54,7 @@ struct AboutView: View {
                 .foregroundStyle(.tertiary)
         }
         .padding(24)
-        .frame(width: 420, height: 560)
+        .frame(minWidth: 420, idealWidth: 420, minHeight: 600)
     }
 
     @ViewBuilder

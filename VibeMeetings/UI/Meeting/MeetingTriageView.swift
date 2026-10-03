@@ -2,19 +2,20 @@ import SwiftUI
 import VMCore
 import VMStorage
 
-/// Lists all meetings that lack metadata (type, labels, org) and lets the user
-/// quickly assign them using a workflow similar to a CLI triage script.
-/// Each meeting is presented one at a time; the user picks a type, destination
-/// folder, attendees, and labels, then moves on.
+/// Walks through meetings that still lack metadata (type, labels, a proper
+/// folder) one at a time so they can be filled in quickly.
 struct MeetingTriageView: View {
     @Environment(AppEnvironment.self) private var env
     @Environment(\.dismiss) private var dismiss
 
-    @State private var untaggedMeetings: [(meeting: Meeting, folderURL: URL)] = []
+    @State private var queue: [(meeting: Meeting, folderURL: URL)] = []
     @State private var currentIndex = 0
     @State private var isLoading = true
+    @State private var isSaving = false
+    @State private var skippedCount = 0
 
-    /// Persisted set of meeting IDs that have already been triaged (via Save or Skip).
+    /// Meeting IDs the user filed or explicitly asked never to be shown again.
+    /// A plain "Skip" does NOT land here — it only moves on for this session.
     private static let triagedKey = "VibeMeetings.TriagedMeetingIDs"
     @State private var triagedIDs: Set<String> = {
         Set(UserDefaults.standard.stringArray(forKey: triagedKey) ?? [])
@@ -22,21 +23,23 @@ struct MeetingTriageView: View {
 
     // Per-meeting editing state
     @State private var selectedType: MeetingType = .group
-    @State private var orgText: String = ""
-    @State private var attendeesText: String = ""
-    @State private var labelsText: String = ""
-    @State private var titleText: String = ""
-    @State private var selectedFolderURL: URL?
-    @State private var newFolderName: String = ""
+    @State private var orgText = ""
+    @State private var attendeesText = ""
+    @State private var labelsText = ""
+    @State private var titleText = ""
+    @State private var folderChoice: FolderChoice = .automatic
+    @State private var newFolderPath = ""
+    @State private var suggestedFolderURL: URL?
 
-    // Known values for suggestions
+    // Known values for one-tap suggestions
     @State private var knownAttendees: [String] = []
     @State private var knownLabels: [String] = []
     @State private var availableFolders: [FolderNode] = []
 
+    private var filer: MeetingFiler { MeetingFiler(env: env) }
+
     private var currentMeeting: Meeting? {
-        guard currentIndex < untaggedMeetings.count else { return nil }
-        return untaggedMeetings[currentIndex].meeting
+        currentIndex < queue.count ? queue[currentIndex].meeting : nil
     }
 
     var body: some View {
@@ -47,15 +50,13 @@ struct MeetingTriageView: View {
             if isLoading {
                 ProgressView("Scanning meetings…")
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
-            } else if untaggedMeetings.isEmpty {
-                doneView
             } else if let meeting = currentMeeting {
                 triageForm(meeting: meeting)
             } else {
                 doneView
             }
         }
-        .frame(width: 600, height: 580)
+        .frame(minWidth: 600, idealWidth: 600, minHeight: 520, idealHeight: 600)
         .task { await loadData() }
     }
 
@@ -63,16 +64,16 @@ struct MeetingTriageView: View {
 
     private var headerBar: some View {
         HStack {
-            Text("Organise Meetings")
+            Text("Organise meetings")
                 .font(.headline)
             Spacer()
-            if !untaggedMeetings.isEmpty {
-                Text("\(currentIndex + 1) of \(untaggedMeetings.count)")
+            if !queue.isEmpty && currentMeeting != nil {
+                Text("\(currentIndex + 1) of \(queue.count)")
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }
             Button("Close") { dismiss() }
-                .keyboardShortcut(.escape)
+                .keyboardShortcut(.cancelAction)
         }
         .padding()
     }
@@ -80,36 +81,45 @@ struct MeetingTriageView: View {
     // MARK: - Done
 
     private var doneView: some View {
-        VStack(spacing: 16) {
+        VStack(spacing: 14) {
             Spacer()
             Image(systemName: "checkmark.circle.fill")
                 .font(.system(size: 48))
                 .foregroundStyle(.green)
-            Text("All meetings are organised")
+                .accessibilityHidden(true)
+            Text(queue.isEmpty ? "Nothing to organise" : "That's all of them")
                 .font(.title3)
-            Text("Every meeting has a type and folder assigned.")
-                .foregroundStyle(.secondary)
-            Button("Re-check all meetings") {
-                triagedIDs.removeAll()
-                UserDefaults.standard.removeObject(forKey: Self.triagedKey)
-                currentIndex = 0
-                Task { await loadData() }
+            if queue.isEmpty {
+                Text("Every meeting already has a type, labels and a folder.")
+                    .foregroundStyle(.secondary)
+            } else if skippedCount > 0 {
+                Text("You skipped \(skippedCount). They'll be here again next time you open Organise.")
+                    .foregroundStyle(.secondary)
+                    .multilineTextAlignment(.center)
             }
-            .buttonStyle(.bordered)
-            .controlSize(.small)
-            .foregroundStyle(.secondary)
+            if !triagedIDs.isEmpty {
+                Button("Show meetings I dismissed again") {
+                    triagedIDs.removeAll()
+                    UserDefaults.standard.removeObject(forKey: Self.triagedKey)
+                    currentIndex = 0
+                    skippedCount = 0
+                    Task { await loadData() }
+                }
+                .buttonStyle(.link)
+                .controlSize(.small)
+            }
             Spacer()
         }
+        .padding(.horizontal)
         .frame(maxWidth: .infinity)
     }
 
-    // MARK: - Triage form
+    // MARK: - Form
 
     @ViewBuilder
     private func triageForm(meeting: Meeting) -> some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 16) {
-                // Meeting info
                 VStack(alignment: .leading, spacing: 4) {
                     Text(meeting.title)
                         .font(.title3.bold())
@@ -125,98 +135,38 @@ struct MeetingTriageView: View {
 
                 Divider()
 
-                // Title (editable)
                 LabeledContent("Title") {
                     TextField("Meeting title", text: $titleText)
                         .textFieldStyle(.roundedBorder)
                 }
 
-                // Type picker
                 LabeledContent("Type") {
-                    Picker("", selection: $selectedType) {
+                    Picker("Type", selection: $selectedType) {
                         Text("1:1").tag(MeetingType.oneOnOne)
-                        Text("Group Meeting").tag(MeetingType.group)
+                        Text("Group").tag(MeetingType.group)
                     }
+                    .labelsHidden()
                     .pickerStyle(.segmented)
                     .frame(width: 200)
                 }
 
-                // Org
                 LabeledContent("Org") {
                     TextField("e.g. EA, Marketing", text: $orgText)
                         .textFieldStyle(.roundedBorder)
                 }
 
-                // Attendees
-                VStack(alignment: .leading, spacing: 4) {
-                    LabeledContent("Attendees") {
-                        TextField("Comma-separated names", text: $attendeesText)
-                            .textFieldStyle(.roundedBorder)
-                    }
-                    if !knownAttendees.isEmpty {
-                        ScrollView(.horizontal, showsIndicators: false) {
-                            HStack(spacing: 4) {
-                                ForEach(knownAttendees, id: \.self) { name in
-                                    Button(name) {
-                                        appendToField(&attendeesText, value: name)
-                                    }
-                                    .buttonStyle(.bordered)
-                                    .controlSize(.small)
-                                }
-                            }
-                        }
-                    }
-                }
+                suggestionField("Attendees", placeholder: "Comma-separated names", text: $attendeesText, known: knownAttendees)
+                suggestionField("Labels", placeholder: "Comma-separated labels", text: $labelsText, known: knownLabels)
 
-                // Labels
-                VStack(alignment: .leading, spacing: 4) {
-                    LabeledContent("Labels") {
-                        TextField("Comma-separated labels", text: $labelsText)
-                            .textFieldStyle(.roundedBorder)
-                    }
-                    if !knownLabels.isEmpty {
-                        ScrollView(.horizontal, showsIndicators: false) {
-                            HStack(spacing: 4) {
-                                ForEach(knownLabels, id: \.self) { label in
-                                    Button(label) {
-                                        appendToField(&labelsText, value: label)
-                                    }
-                                    .buttonStyle(.bordered)
-                                    .controlSize(.small)
-                                }
-                            }
-                        }
-                    }
-                }
-
-                // Destination folder
                 VStack(alignment: .leading, spacing: 4) {
                     Text("Move to folder").font(.subheadline.bold())
-                    Picker("Folder", selection: $selectedFolderURL) {
-                        Text("(keep in current folder)").tag(nil as URL?)
-                        ForEach(availableFolders, id: \.url) { folder in
-                            Text(folderDisplayPath(folder))
-                                .tag(folder.url as URL?)
-                        }
-                    }
-                    .labelsHidden()
-
-                    HStack(spacing: 8) {
-                        TextField("Or create new folder", text: $newFolderName)
-                            .textFieldStyle(.roundedBorder)
-                            .frame(maxWidth: 200)
-                        if !newFolderName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-                            Text("Will be created in root")
-                                .font(.caption)
-                                .foregroundStyle(.secondary)
-                        }
-                    }
-
-                    if selectedFolderURL != nil {
-                        Label("Auto-suggested based on meeting metadata", systemImage: "sparkles")
-                            .font(.caption)
-                            .foregroundStyle(.blue)
-                    }
+                    FolderChoicePicker(
+                        choice: $folderChoice,
+                        newFolderPath: $newFolderPath,
+                        folders: availableFolders,
+                        rootURL: env.rootURL,
+                        suggestedURL: suggestedFolderURL
+                    )
                 }
             }
             .padding()
@@ -224,22 +174,50 @@ struct MeetingTriageView: View {
 
         Divider()
 
-        // Action buttons
         HStack {
-            Button("Skip") {
-                advanceToNext()
-            }
-            .keyboardShortcut("s", modifiers: [])
+            Button("Back") { goBack() }
+                .disabled(currentIndex == 0)
+                .keyboardShortcut(.leftArrow, modifiers: .command)
+
+            Button("Skip") { skip() }
+                .keyboardShortcut(.rightArrow, modifiers: .command)
+                .help("Come back to this meeting next time")
+
+            Button("Don't ask again") { dismissForever() }
+                .help("Stop offering this meeting in Organise")
 
             Spacer()
 
-            Button("Save & Next") {
+            Button("Save & next") {
                 Task { await saveAndAdvance() }
             }
             .buttonStyle(.borderedProminent)
             .keyboardShortcut(.return, modifiers: .command)
+            .disabled(isSaving)
         }
         .padding()
+    }
+
+    /// A comma-separated text field with one-tap chips for values already used
+    /// in other meetings.
+    @ViewBuilder
+    private func suggestionField(_ title: String, placeholder: String, text: Binding<String>, known: [String]) -> some View {
+        VStack(alignment: .leading, spacing: 4) {
+            LabeledContent(title) {
+                TextField(placeholder, text: text)
+                    .textFieldStyle(.roundedBorder)
+            }
+            if !known.isEmpty {
+                // Wraps instead of scrolling sideways, so every option is visible.
+                FlowLayout(spacing: 4) {
+                    ForEach(known, id: \.self) { value in
+                        Button(value) { append(value, to: text) }
+                            .buttonStyle(.bordered)
+                            .controlSize(.small)
+                    }
+                }
+            }
+        }
     }
 
     // MARK: - Data loading
@@ -249,297 +227,115 @@ struct MeetingTriageView: View {
         defer { isLoading = false }
 
         let tree = await env.meetingStore.currentTree()
+        availableFolders = tree.allFolders
 
-        // Collect all folders for the destination picker.
-        availableFolders = collectAllFolders(in: tree)
+        var pending: [(Meeting, URL)] = []
+        for node in tree.allMeetingNodes {
+            guard let m = node.meeting, !triagedIDs.contains(m.id.uuidString) else { continue }
+            let needsTriage = m.meetingType == nil
+                || (m.labels?.isEmpty ?? true)
+                || node.url.deletingLastPathComponent().standardizedFileURL == env.rootURL.standardizedFileURL
+            if needsTriage { pending.append((m, node.url)) }
+        }
+        // Chronological order: oldest first.
+        pending.sort { $0.0.startedAt < $1.0.startedAt }
+        queue = pending.map { (meeting: $0.0, folderURL: $0.1) }
 
-        // Collect all meetings that are "untagged" — no meetingType explicitly set,
-        // or no labels, or sitting in the root folder (not organized).
-        var meetings: [(Meeting, URL)] = []
-        collectUntaggedMeetings(in: tree, rootURL: env.rootURL, into: &meetings)
-
-        // Sort by date (oldest first — triage in chronological order).
-        meetings.sort { $0.0.startedAt < $1.0.startedAt }
-        untaggedMeetings = meetings
-
-        // Collect known attendees and labels from all meetings in the tree.
-        var attendeeSet = Set<String>()
-        var labelSet = Set<String>()
-        collectKnownValues(in: tree, attendees: &attendeeSet, labels: &labelSet)
+        var attendeeSet = Set<String>(), labelSet = Set<String>()
+        for m in tree.allMeetings {
+            m.attendees?.forEach { attendeeSet.insert($0) }
+            m.labels?.forEach { labelSet.insert($0) }
+        }
         knownAttendees = attendeeSet.sorted()
         knownLabels = labelSet.sorted()
 
-        // Set up the first meeting's form state.
-        if let first = untaggedMeetings.first {
-            populateForm(for: first.meeting, folderURL: first.folderURL)
-        }
+        if let first = queue.first { await populateForm(for: first.meeting) }
     }
 
-    private func collectUntaggedMeetings(
-        in node: FolderNode,
-        rootURL: URL,
-        into result: inout [(Meeting, URL)]
-    ) {
-        if node.isMeeting, let m = node.meeting {
-            // Skip meetings already triaged in a previous session.
-            guard !triagedIDs.contains(m.id.uuidString) else { return }
-
-            let needsTriage = m.meetingType == nil
-                || (m.labels == nil || m.labels?.isEmpty == true)
-                || node.url.deletingLastPathComponent().standardizedFileURL == rootURL.standardizedFileURL
-            if needsTriage {
-                result.append((m, node.url))
-            }
-        } else {
-            for child in node.children {
-                collectUntaggedMeetings(in: child, rootURL: rootURL, into: &result)
-            }
-        }
-    }
-
-    private func collectAllFolders(in node: FolderNode) -> [FolderNode] {
-        var result: [FolderNode] = []
-        if !node.isMeeting {
-            result.append(node)
-            for child in node.children {
-                result.append(contentsOf: collectAllFolders(in: child))
-            }
-        }
-        return result
-    }
-
-    private func collectKnownValues(
-        in node: FolderNode,
-        attendees: inout Set<String>,
-        labels: inout Set<String>
-    ) {
-        if let m = node.meeting {
-            m.attendees?.forEach { attendees.insert($0) }
-            m.labels?.forEach { labels.insert($0) }
-        }
-        for child in node.children {
-            collectKnownValues(in: child, attendees: &attendees, labels: &labels)
-        }
-    }
-
-    // MARK: - Form population
-
-    private func populateForm(for meeting: Meeting, folderURL: URL) {
+    private func populateForm(for meeting: Meeting) async {
         titleText = meeting.title
         selectedType = meeting.resolvedType
         orgText = meeting.org ?? ""
         attendeesText = (meeting.attendees ?? []).joined(separator: ", ")
         labelsText = (meeting.labels ?? []).joined(separator: ", ")
-
-        newFolderName = ""
-
-        // Auto-suggest a destination folder based on type and attendees.
-        selectedFolderURL = suggestFolder(for: meeting)
+        newFolderPath = ""
+        suggestedFolderURL = await filer.suggestFolder(for: meeting, in: availableFolders)
+        folderChoice = suggestedFolderURL.map { .folder($0) } ?? .automatic
     }
 
-    /// Finds the best folder for a meeting based on its type, attendees, and title.
-    /// For 1:1s, looks for a "People/<person>" folder. For group meetings,
-    /// looks for an org-named folder. Returns nil if no match found.
-    private func suggestFolder(for meeting: Meeting) -> URL? {
-        // For 1:1 meetings, look for the person's name in existing folders.
-        if meeting.resolvedType == .oneOnOne {
-            if let person = meeting.person ?? meeting.attendees?.first(where: { $0.lowercased() != "you" }) {
-                if let match = findFolderByName(person) {
-                    return match.url
-                }
-            }
-        }
+    // MARK: - Navigation
 
-        // Try matching org name to an existing folder.
-        if let org = meeting.org, !org.isEmpty {
-            if let match = findFolderByName(org) {
-                return match.url
-            }
+    private func show(index: Int) {
+        currentIndex = index
+        if index < queue.count {
+            let m = queue[index].meeting
+            Task { await populateForm(for: m) }
         }
-
-        // Try matching keywords from the title to existing folder names.
-        let titleWords = meeting.title
-            .components(separatedBy: CharacterSet.alphanumerics.inverted)
-            .filter { $0.count > 3 }
-        for folder in availableFolders {
-            let folderLower = folder.name.lowercased()
-            for word in titleWords where folderLower.contains(word.lowercased()) {
-                return folder.url
-            }
-        }
-
-        return nil
     }
 
-    private func findFolderByName(_ name: String) -> FolderNode? {
-        let lower = name.lowercased()
-        // Exact match first, then substring match.
-        if let exact = availableFolders.first(where: { $0.name.lowercased() == lower }) {
-            return exact
-        }
-        return availableFolders.first(where: { $0.name.lowercased().contains(lower) || lower.contains($0.name.lowercased()) })
+    /// Move on for now; the meeting comes back next time.
+    private func skip() {
+        skippedCount += 1
+        show(index: currentIndex + 1)
     }
 
-    // MARK: - Actions
+    private func goBack() {
+        show(index: max(0, currentIndex - 1))
+    }
 
-    private func markTriaged(_ meetingID: UUID) {
-        triagedIDs.insert(meetingID.uuidString)
+    /// Persistently stop offering this meeting.
+    private func dismissForever() {
+        if let m = currentMeeting { markTriaged(m.id) }
+        show(index: currentIndex + 1)
+    }
+
+    private func markTriaged(_ id: UUID) {
+        triagedIDs.insert(id.uuidString)
         UserDefaults.standard.set(Array(triagedIDs), forKey: Self.triagedKey)
     }
 
-    private func advanceToNext() {
-        // Mark the current meeting as triaged before advancing.
-        if currentIndex < untaggedMeetings.count {
-            markTriaged(untaggedMeetings[currentIndex].meeting.id)
-        }
-        currentIndex += 1
-        if currentIndex < untaggedMeetings.count {
-            let next = untaggedMeetings[currentIndex]
-            populateForm(for: next.meeting, folderURL: next.folderURL)
-        }
-    }
+    // MARK: - Save
 
     private func saveAndAdvance() async {
-        guard currentIndex < untaggedMeetings.count else { return }
-        let entry = untaggedMeetings[currentIndex]
-        var meeting = entry.meeting
+        guard currentIndex < queue.count else { return }
+        isSaving = true
+        defer { isSaving = false }
 
-        // Apply edits.
+        let entry = queue[currentIndex]
+        var meeting = entry.meeting
         meeting.title = titleText.trimmingCharacters(in: .whitespacesAndNewlines)
         meeting.meetingType = selectedType
-
         let org = orgText.trimmingCharacters(in: .whitespacesAndNewlines)
         meeting.org = org.isEmpty ? nil : org
-
-        let attendees = attendeesText
-            .split(separator: ",")
-            .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
-            .filter { !$0.isEmpty }
+        let attendees = attendeesText.commaSeparatedItems
         meeting.attendees = attendees.isEmpty ? nil : attendees
-
-        let labels = labelsText
-            .split(separator: ",")
-            .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
-            .filter { !$0.isEmpty }
+        let labels = labelsText.commaSeparatedItems
         meeting.labels = labels.isEmpty ? nil : labels
 
-        // Persist metadata.
-        try? await env.meetingStore.updateMeeting(meeting)
+        // Stay on this meeting if saving fails, so nothing typed is lost.
+        guard await env.attempt("save the meeting details", { try await env.meetingStore.updateMeeting(meeting) }) != nil else { return }
 
-        // Determine the target folder: new folder name takes priority, then picker, then auto-suggest.
-        var targetURL = selectedFolderURL
-        let trimmedNewFolder = newFolderName.trimmingCharacters(in: .whitespacesAndNewlines)
-
-        if !trimmedNewFolder.isEmpty {
-            // Create the new folder at root level.
-            if let root = env.folderTree {
-                let newFolder = try? await env.meetingStore.createFolder(at: root, name: trimmedNewFolder)
-                targetURL = newFolder?.url
-            }
-        } else if targetURL == nil {
-            // If no folder was picked or typed, auto-create based on meeting metadata.
-            targetURL = await autoCreateFolder(for: meeting)
-        }
-
-        // Move to the target folder if different from current location.
-        if let targetURL {
-            let currentParent = entry.folderURL.deletingLastPathComponent()
-            if targetURL.standardizedFileURL != currentParent.standardizedFileURL {
-                let tree = await env.meetingStore.currentTree()
-                if let targetNode = findFolderNode(at: targetURL, in: tree) {
-                    try? await env.meetingStore.moveMeeting(id: meeting.id, to: targetNode)
-                }
+        await env.attempt("move the meeting") {
+            if let target = try await filer.destination(
+                for: folderChoice, newFolderPath: newFolderPath, meeting: meeting, folders: availableFolders
+            ) {
+                try await filer.move(meetingID: meeting.id, currentFolder: entry.folderURL, to: target)
             }
         }
 
-        // Update known values for the next iteration.
-        attendees.forEach { knownAttendees.appendIfNew($0) }
-        labels.forEach { knownLabels.appendIfNew($0) }
+        attendees.forEach { if !knownAttendees.contains($0) { knownAttendees.append($0) } }
+        labels.forEach { if !knownLabels.contains($0) { knownLabels.append($0) } }
 
         await env.refreshFolderTree()
+        if let tree = env.folderTree { availableFolders = tree.allFolders }
 
-        // Refresh available folders for the next meeting (may have been created).
-        if let tree = env.folderTree {
-            availableFolders = collectAllFolders(in: tree)
-        }
-
-        advanceToNext()
+        markTriaged(meeting.id)
+        show(index: currentIndex + 1)
     }
 
-    /// Auto-creates a folder based on meeting metadata when no folder was selected.
-    /// For 1:1s: creates "People/<PersonName>". For group meetings: creates "<Org>" if org is set.
-    private func autoCreateFolder(for meeting: Meeting) async -> URL? {
-        guard let root = env.folderTree else { return nil }
-
-        if meeting.resolvedType == .oneOnOne {
-            let person = meeting.person ?? meeting.attendees?.first(where: { $0.lowercased() != "you" })
-            if let person, !person.isEmpty {
-                // Look for or create a "People" parent folder.
-                let peopleFolder: FolderNode
-                if let existing = availableFolders.first(where: { $0.name.lowercased() == "people" }) {
-                    peopleFolder = existing
-                } else {
-                    guard let created = try? await env.meetingStore.createFolder(at: root, name: "People") else { return nil }
-                    peopleFolder = created
-                }
-                // Create the person subfolder.
-                if let existing = availableFolders.first(where: { $0.name.lowercased() == person.lowercased() }) {
-                    return existing.url
-                }
-                let personFolder = try? await env.meetingStore.createFolder(at: peopleFolder, name: person)
-                return personFolder?.url
-            }
-        }
-
-        // For group meetings with an org, create an org folder.
-        let org = meeting.org ?? orgText.trimmingCharacters(in: .whitespacesAndNewlines)
-        if !org.isEmpty {
-            if let existing = availableFolders.first(where: { $0.name.lowercased() == org.lowercased() }) {
-                return existing.url
-            }
-            let orgFolder = try? await env.meetingStore.createFolder(at: root, name: org)
-            return orgFolder?.url
-        }
-
-        return nil
-    }
-
-    // MARK: - Helpers
-
-    private func appendToField(_ field: inout String, value: String) {
-        let trimmed = field.trimmingCharacters(in: .whitespacesAndNewlines)
-        if trimmed.isEmpty {
-            field = value
-        } else {
-            field = trimmed + ", " + value
-        }
-    }
-
-    private func folderDisplayPath(_ node: FolderNode) -> String {
-        // Show path relative to root.
-        let rootPath = env.rootURL.path
-        let nodePath = node.url.path
-        if nodePath.hasPrefix(rootPath) {
-            let relative = String(nodePath.dropFirst(rootPath.count))
-                .trimmingCharacters(in: CharacterSet(charactersIn: "/"))
-            return relative.isEmpty ? "/" : relative
-        }
-        return node.name
-    }
-
-    private func findFolderNode(at url: URL, in node: FolderNode) -> FolderNode? {
-        if node.url.standardizedFileURL == url.standardizedFileURL { return node }
-        for child in node.children {
-            if let hit = findFolderNode(at: url, in: child) { return hit }
-        }
-        return nil
-    }
-}
-
-private extension Array where Element == String {
-    mutating func appendIfNew(_ value: String) {
-        if !contains(value) {
-            append(value)
-        }
+    private func append(_ value: String, to text: Binding<String>) {
+        let existing = text.wrappedValue.commaSeparatedItems
+        guard !existing.contains(value) else { return }
+        text.wrappedValue = (existing + [value]).joined(separator: ", ")
     }
 }

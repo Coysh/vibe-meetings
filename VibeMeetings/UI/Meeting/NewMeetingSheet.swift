@@ -25,6 +25,8 @@ struct NewMeetingSheet: View {
     @State private var manualTitle: String = "New Meeting"
     @State private var creating = false
     @State private var error: String?
+    @FocusState private var titleFocused: Bool
+    @State private var calendarAccess = false
 
     enum Selection: Hashable {
         case blank
@@ -47,18 +49,14 @@ struct NewMeetingSheet: View {
 
             blankSection
 
-            Text("Engine: \(env.activeTranscriptionEngine.displayName) · Model: \(env.selectedModelId)")
-                .font(.caption)
-                .foregroundStyle(.secondary)
-
             if let error {
                 Text(error).foregroundStyle(.red).font(.caption)
             }
 
             HStack {
                 Spacer()
-                Button("Cancel") { dismiss() }.keyboardShortcut(.escape)
-                Button("Start") { Task { await create() } }
+                Button("Cancel") { dismiss() }.keyboardShortcut(.cancelAction)
+                Button("Start recording") { Task { await create() } }
                     .keyboardShortcut(.defaultAction)
                     .buttonStyle(.borderedProminent)
                     .disabled(!canStart || creating)
@@ -73,14 +71,16 @@ struct NewMeetingSheet: View {
     private var calendarSection: some View {
         if todaysEvents.isEmpty {
             VStack(alignment: .leading, spacing: 4) {
-                Text("Today's events").font(.subheadline.bold())
-                Text("No upcoming events in the next 12 hours, or calendar access not granted.")
+                Text("Coming up").font(.subheadline.bold())
+                Text(calendarAccess
+                     ? "Nothing on your calendar in the next 12 hours."
+                     : "Calendar access is off, so events can't be listed. You can turn it on in Settings → Calendar.")
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }
         } else {
             VStack(alignment: .leading, spacing: 4) {
-                Text("Today's events").font(.subheadline.bold())
+                Text("Coming up").font(.subheadline.bold())
                 List(selection: $selection) {
                     ForEach(todaysEvents) { ev in
                         EventRow(event: ev)
@@ -96,18 +96,27 @@ struct NewMeetingSheet: View {
     @ViewBuilder
     private var blankSection: some View {
         VStack(alignment: .leading, spacing: 6) {
-            HStack {
-                Image(systemName: selection == .blank ? "largecircle.fill.circle" : "circle")
-                    .foregroundStyle(.tint)
-                Text("Or start a blank meeting").font(.subheadline.bold())
-                Spacer()
+            // A real button (keyboard- and VoiceOver-accessible), not an icon with a tap gesture.
+            Button {
+                selection = .blank
+                titleFocused = true
+            } label: {
+                HStack {
+                    Image(systemName: selection == .blank ? "largecircle.fill.circle" : "circle")
+                        .foregroundStyle(.tint)
+                    Text("Or start a blank meeting").font(.subheadline.bold())
+                    Spacer()
+                }
+                .contentShape(Rectangle())
             }
-            .contentShape(Rectangle())
-            .onTapGesture { selection = .blank }
+            .buttonStyle(.plain)
+            .accessibilityAddTraits(selection == .blank ? [.isSelected] : [])
 
+            // Always editable: clicking into it chooses "blank" (it used to be dead while an event was selected).
             TextField("Title", text: $manualTitle)
                 .textFieldStyle(.roundedBorder)
-                .disabled(selection != .blank)
+                .focused($titleFocused)
+                .onChange(of: titleFocused) { if titleFocused { selection = .blank } }
         }
     }
 
@@ -121,11 +130,15 @@ struct NewMeetingSheet: View {
     }
 
     private func reloadEvents() async {
+        let status = env.calendarService.authorizationStatus()
+        calendarAccess = status == .fullAccess || status == .authorized
         let events = await env.calendarService.upcomingEvents(within: 12 * 60 * 60)
         todaysEvents = events
         if let preselectedEventID, events.contains(where: { $0.id == preselectedEventID }) {
             selection = .event(preselectedEventID)
-        } else if let next = events.first(where: { $0.endDate > Date() }) {
+        } else if let next = events.first(where: { $0.endDate > Date() && $0.startDate < Date().addingTimeInterval(30 * 60) }) {
+            // Only preselect an event that is happening now or about to start —
+            // pressing Return used to be able to record under an event 10 hours away.
             selection = .event(next.id)
         } else {
             selection = .blank

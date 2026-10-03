@@ -85,8 +85,21 @@ final class MeetingEndDetector {
     private static let micNotifKey = "VibeMeetings.AutoEndDetection.MicSilenceNotification"
     private static let micSilenceSecondsKey = "VibeMeetings.AutoEndDetection.MicSilenceSeconds"
 
-    private var dismissed = false
+    /// What raised a suggestion. Dismissing one only quiets *that* signal, and only
+    /// for a while — previously a single "Keep recording" switched off every signal
+    /// for the rest of the recording, so a forgotten recording could run for hours.
+    private enum Signal { case silence, calendar, app }
+    private var activeSignal: Signal?
+    private var snoozedUntil: [Signal: Date] = [:]
     private var monitorTask: Task<Void, Never>?
+
+    private func isSnoozed(_ signal: Signal) -> Bool {
+        snoozedUntil[signal].map { Date() < $0 } ?? false
+    }
+
+    /// Meetings routinely run a little over; wait this long past the scheduled
+    /// end before suggesting the recording stop.
+    private static let calendarGrace: TimeInterval = 2 * 60
 
     init() {
         let defaults = UserDefaults.standard
@@ -107,7 +120,8 @@ final class MeetingEndDetector {
         silenceStartedAt = nil
         micSilenceStartedAt = nil
         micSilenceNotified = false
-        dismissed = false
+        activeSignal = nil
+        snoozedUntil = [:]
 
         // Snapshot: is a meeting app currently running?
         meetingAppWasRunning = isMeetingAppRunning()
@@ -129,17 +143,26 @@ final class MeetingEndDetector {
         silenceStartedAt = nil
         micSilenceStartedAt = nil
         micSilenceNotified = false
-        dismissed = false
+        activeSignal = nil
+        snoozedUntil = [:]
         meetingAppWasRunning = false
         monitorTask?.cancel()
         monitorTask = nil
     }
 
-    /// Call when the user dismisses the suggestion.
+    /// Call when the user chooses "Keep recording". Only the signal that raised
+    /// this suggestion is quieted; the others stay armed.
     func dismiss() {
-        dismissed = true
+        let signal = activeSignal
         shouldSuggestEnd = false
         endReason = ""
+        activeSignal = nil
+        switch signal {
+        case .silence: silenceStartedAt = nil                                   // needs a fresh full stretch of silence
+        case .calendar: snoozedUntil[.calendar] = Date().addingTimeInterval(10 * 60)
+        case .app: snoozedUntil[.app] = Date().addingTimeInterval(5 * 60)
+        case nil: break
+        }
     }
 
     // MARK: - Signal: Audio levels
@@ -149,7 +172,7 @@ final class MeetingEndDetector {
     func updateLevels(mic: Float, system: Float) {
         checkMicSilence(mic: mic)
 
-        guard autoEndEnabled, !dismissed else { return }
+        guard autoEndEnabled else { return }
 
         let bothSilent = mic < silenceFloorDBFS && system < silenceFloorDBFS
 
@@ -160,7 +183,7 @@ final class MeetingEndDetector {
             let silenceDuration = Date().timeIntervalSince(silenceStartedAt!)
             if silenceDuration >= silenceThresholdSeconds {
                 let minutes = Int(silenceDuration / 60)
-                suggest(reason: "No audio detected for \(minutes > 0 ? "\(minutes) minute\(minutes == 1 ? "" : "s")" : "a while")")
+                suggest(reason: "No audio detected for \(minutes > 0 ? "\(minutes) minute\(minutes == 1 ? "" : "s")" : "a while")", signal: .silence)
             }
         } else {
             // Audio resumed — reset silence timer.
@@ -192,11 +215,11 @@ final class MeetingEndDetector {
 
     /// Called periodically with the linked calendar event.
     func checkCalendarEnd(event: CalendarEvent?) {
-        guard autoEndEnabled, !dismissed else { return }
+        guard autoEndEnabled, !isSnoozed(.calendar) else { return }
         guard let event else { return }
 
-        if Date() > event.endDate {
-            suggest(reason: "Meeting has passed its scheduled end time")
+        if Date() > event.endDate.addingTimeInterval(Self.calendarGrace) {
+            suggest(reason: "Meeting has passed its scheduled end time", signal: .calendar)
         }
     }
 
@@ -205,11 +228,11 @@ final class MeetingEndDetector {
     /// Checks whether the meeting app that was running at recording start
     /// is still running. If it's gone, the call likely ended.
     private func checkMeetingAppStatus() {
-        guard autoEndEnabled, appMonitoringEnabled, !dismissed else { return }
+        guard autoEndEnabled, appMonitoringEnabled, !isSnoozed(.app) else { return }
         guard meetingAppWasRunning else { return }
 
         if !isMeetingAppRunning() {
-            suggest(reason: "Meeting app appears to have ended the call")
+            suggest(reason: "Meeting app appears to have ended the call", signal: .app)
         }
     }
 
@@ -217,8 +240,8 @@ final class MeetingEndDetector {
     /// the call being recorded has let go of it for over a minute — a much
     /// earlier and more reliable signal than the app quitting.
     func callAppReleasedMic(appName: String?) {
-        guard autoEndEnabled, appMonitoringEnabled, !dismissed else { return }
-        suggest(reason: "\(appName ?? "The meeting app") released the microphone")
+        guard autoEndEnabled, appMonitoringEnabled, !isSnoozed(.app) else { return }
+        suggest(reason: "\(appName ?? "The meeting app") released the microphone", signal: .app)
     }
 
     /// Returns true if any known (dedicated) meeting app is currently running.
@@ -232,9 +255,10 @@ final class MeetingEndDetector {
 
     // MARK: - Private
 
-    private func suggest(reason: String) {
+    private func suggest(reason: String, signal: Signal) {
         guard !shouldSuggestEnd else { return } // Don't overwrite an existing suggestion.
         shouldSuggestEnd = true
         endReason = reason
+        activeSignal = signal
     }
 }

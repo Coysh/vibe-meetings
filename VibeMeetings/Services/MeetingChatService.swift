@@ -61,6 +61,13 @@ final class MeetingChatService {
         }
     }
 
+    /// Stop the answer that is currently streaming; what has arrived so far is kept.
+    func stopStreaming() {
+        streamTask?.cancel()
+        streamTask = nil
+        isStreaming = false
+    }
+
     func clearHistory() {
         streamTask?.cancel()
         streamTask = nil
@@ -79,7 +86,7 @@ final class MeetingChatService {
         liveRecording: (meeting: Meeting, segments: [TranscriptSegment])? = nil
     ) async {
         // 1. Collect meetings from the folder tree, filtered by includedMeetingIDs if set.
-        var allMeetings = collectAllMeetings(from: folderTree)
+        var allMeetings = folderTree?.allMeetings ?? []
         if let filter = includedMeetingIDs {
             allMeetings = allMeetings.filter { filter.contains($0.id) }
         }
@@ -227,18 +234,6 @@ final class MeetingChatService {
                 messages[msgIndex].content = "Sorry, I couldn't generate a response. Error: \(error.localizedDescription)"
             }
         }
-    }
-
-    private func collectAllMeetings(from node: FolderNode?) -> [Meeting] {
-        guard let node else { return [] }
-        var result: [Meeting] = []
-        if node.isMeeting, let m = node.meeting {
-            result.append(m)
-        }
-        for child in node.children {
-            result.append(contentsOf: collectAllMeetings(from: child))
-        }
-        return result
     }
 
     private func loadChatPrompt() -> String {

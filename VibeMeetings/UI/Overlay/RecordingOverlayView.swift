@@ -35,8 +35,8 @@ struct RecordingOverlayView: View {
             }
         } else if service.isStarting {
             startingRow
-        } else if let error = service.lastStartError {
-            errorRow(error)
+        } else if let failure = service.startFailure {
+            failureRow(failure)
         } else if let call = env.bannerCoordinator.unrecordedCall {
             unrecordedRow(call)
         }
@@ -60,6 +60,41 @@ struct RecordingOverlayView: View {
                 .controlSize(.small)
         }
         .help(message)
+    }
+
+    /// A start that failed, kept on screen with what to do about it.
+    private func failureRow(_ failure: RecordingSessionService.StartFailure) -> some View {
+        HStack(spacing: 8) {
+            Image(systemName: "exclamationmark.triangle.fill")
+                .foregroundStyle(.orange)
+                .accessibilityHidden(true)
+            VStack(alignment: .leading, spacing: 0) {
+                Text("Couldn't start recording").fontWeight(.medium)
+                Text(failure.message)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .lineLimit(2)
+                    .frame(maxWidth: 260, alignment: .leading)
+            }
+            if let permission = failure.permission, let url = permission.settingsURL {
+                Button("Open Settings") { NSWorkspace.shared.open(url) }
+                    .buttonStyle(.borderedProminent)
+                    .controlSize(.small)
+            } else if failure.retry != nil {
+                Button("Try again") { Task { await env.recordingService.retryFailedStart() } }
+                    .buttonStyle(.borderedProminent)
+                    .controlSize(.small)
+            }
+            Button {
+                env.recordingService.dismissStartFailure()
+            } label: {
+                Image(systemName: "xmark")
+            }
+            .buttonStyle(.borderless)
+            .help("Dismiss")
+            .accessibilityLabel("Dismiss")
+        }
+        .help(failure.message)
     }
 
     private func unrecordedRow(_ call: CallSession) -> some View {
@@ -97,7 +132,7 @@ struct RecordingOverlayView: View {
                 }
                 Button("Not a Meeting") { env.bannerCoordinator.notAMeeting(sessionID: call.id) }
                 Divider()
-                Button("Open vibe-meetings") { env.presenter.show() }
+                Button("Open Vibe Meetings") { env.presenter.show() }
             } label: {
                 Image(systemName: "ellipsis")
             }
@@ -113,6 +148,7 @@ struct RecordingOverlayView: View {
 /// timer updates only re-render this row.
 private struct RecordingRow: View {
     @Environment(AppEnvironment.self) private var env
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     let controller: RecordingController
     @State private var pulse = false
 
@@ -122,9 +158,10 @@ private struct RecordingRow: View {
                 Circle()
                     .fill(.red)
                     .frame(width: 10, height: 10)
-                    .opacity(pulse ? 0.35 : 1)
-                    .animation(.easeInOut(duration: 0.9).repeatForever(autoreverses: true), value: pulse)
+                    .opacity(pulse && !reduceMotion ? 0.35 : 1)
+                    .animation(reduceMotion ? nil : .easeInOut(duration: 0.9).repeatForever(autoreverses: true), value: pulse)
                     .onAppear { pulse = true }
+                    .accessibilityLabel("Recording")
 
                 Button {
                     if let id = controller.meetingHandle?.meeting.id {
@@ -143,17 +180,66 @@ private struct RecordingRow: View {
                 Text(controller.elapsed.formattedTimestamp)
                     .monospacedDigit()
                     .foregroundStyle(.secondary)
+
+                // A glance tells you the mic is live — and which mic.
+                MiniMeter(level: controller.micLevel)
+                    .help("Microphone: \(controller.micDeviceName)")
+                    .accessibilityLabel("Microphone level, \(controller.micDeviceName)")
             }
             .gesture(WindowDragGesture())
+
+            if let issue = controller.issues.first {
+                Button {
+                    if let url = issue.fix?.settingsURL { NSWorkspace.shared.open(url) } else { env.presenter.show() }
+                } label: {
+                    Image(systemName: "exclamationmark.triangle.fill").foregroundStyle(.orange)
+                }
+                .buttonStyle(.borderless)
+                .help(issue.message + (issue.fix != nil ? " Click to open settings." : ""))
+                .accessibilityLabel(issue.message)
+            } else if case .loadingModel = controller.transcriptionStatus {
+                ProgressView().controlSize(.small)
+                    .help("Preparing live transcription — audio is already being recorded")
+            }
+
+            // The end-of-meeting prompt used to appear only inside the main window
+            // (or a notification) — invisible during a call with the window closed.
+            if env.bannerCoordinator.meetingEndSuggestion {
+                Text("Meeting ended?")
+                    .font(.caption)
+                    .foregroundStyle(.orange)
+                    .help(env.bannerCoordinator.meetingEndReason)
+                Button("Keep recording") { env.bannerCoordinator.dismissMeetingEnd() }
+                    .controlSize(.small)
+            }
 
             Button {
                 Task { await env.recordingService.stop() }
             } label: {
-                Label("Stop", systemImage: "stop.fill")
+                if controller.isFinishing {
+                    ProgressView().controlSize(.small)
+                } else {
+                    Label("Stop", systemImage: "stop.fill")
+                }
             }
             .buttonStyle(.bordered)
             .tint(.red)
             .controlSize(.small)
+            .disabled(controller.isFinishing)
         }
+    }
+}
+
+/// A tiny level bar for the floating pill.
+private struct MiniMeter: View {
+    let level: Float
+
+    var body: some View {
+        let pct = LevelMeterView.fraction(level)
+        ZStack(alignment: .leading) {
+            Capsule().fill(Color.primary.opacity(0.12))
+            Capsule().fill(pct > 0.85 ? Color.red : Color.green).frame(width: 36 * pct)
+        }
+        .frame(width: 36, height: 5)
     }
 }

@@ -16,7 +16,8 @@ struct CalendarSettingsView: View {
         Form {
             Section("Permission") {
                 LabeledContent("Status") { Text(statusLabel) }
-                if !isGranted {
+                // EventKit only prompts once; after a denial the button would do nothing.
+                if status == .notDetermined {
                     Button("Request access") {
                         Task {
                             status = await env.calendarService.requestAccess()
@@ -35,7 +36,7 @@ struct CalendarSettingsView: View {
 
             if calendars.isEmpty {
                 Section("Calendars to watch") {
-                    Text("Grant access above to see your calendars.")
+                    Text(isGranted ? "No calendars were found on this Mac." : "Allow calendar access above to choose which calendars to watch.")
                         .foregroundStyle(.secondary)
                         .font(.caption)
                 }
@@ -76,7 +77,7 @@ struct CalendarSettingsView: View {
                         CalendarPreferences.shared.bannerEnabled = v
                         env.eventReminders.setNeedsReconcile()
                     }
-                Text("When an online meeting from your calendar is starting, show a one-click banner offering to start recording. The app never auto-starts recordings.")
+                Text("When an online meeting from your calendar is starting, show a one-click banner offering to start recording. This is also the master switch for the pre-meeting reminders in the Notifications tab. The app never starts recording on its own.")
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }
@@ -133,7 +134,7 @@ struct CalendarSettingsView: View {
         case .notDetermined: return "Not requested"
         case .denied: return "Denied"
         case .restricted: return "Restricted"
-        case .writeOnly: return "Write-only (read denied)"
+        case .writeOnly: return "Limited — can add events but not read them"
         case .fullAccess: return "Full access"
         case .authorized: return "Authorized"
         @unknown default: return "Unknown"

@@ -22,8 +22,19 @@ final class RecordingSessionService {
     private(set) var controller: RecordingController?
     /// True between a start request and the meeting being created.
     private(set) var isStarting = false
-    /// Last start failure, shown briefly by the overlay.
-    private(set) var lastStartError: String?
+    /// The last failed start, kept until the user dismisses it, retries, or
+    /// starts another recording — so there is time to read it and act.
+    private(set) var startFailure: StartFailure?
+
+    struct StartFailure {
+        let message: String
+        /// A missing permission the user can grant, if that's the cause.
+        let permission: RecordingPermission?
+        /// What to run again for "Try again" (nil if it can't be repeated).
+        let retry: MeetingStartRequest?
+    }
+
+    var lastStartError: String? { startFailure?.message }
 
     @ObservationIgnored private unowned let env: AppEnvironment
 
@@ -44,13 +55,13 @@ final class RecordingSessionService {
     func start(_ request: MeetingStartRequest, fallbackParent: FolderNode? = nil) async throws -> MeetingHandle? {
         guard !isBusy else { return nil }
         isStarting = true
-        lastStartError = nil
+        startFailure = nil
         defer { isStarting = false }
 
         let handle = try await MeetingDraftFactory.createMeeting(for: request, env: env, fallbackParent: fallbackParent)
         let c = RecordingController(env: env)
         begin(c, meetingID: handle.meeting.id, eventID: handle.meeting.calendarEventID)
-        Task { await self.run(c) { await c.start(handle: handle) } }
+        Task { await self.run(c, retry: request) { await c.start(handle: handle) } }
         return handle
     }
 
@@ -59,7 +70,7 @@ final class RecordingSessionService {
         guard !isBusy else { return }
         let c = RecordingController(env: env)
         begin(c, meetingID: handle.meeting.id, eventID: handle.meeting.calendarEventID)
-        await run(c) { await c.resume(handle: handle) }
+        await run(c, retry: nil) { await c.resume(handle: handle) }
     }
 
     /// One-click start for the call currently detected from mic activity (or
@@ -74,6 +85,11 @@ final class RecordingSessionService {
             platform: app?.platform,
             event: event
         ))
+    }
+
+    /// One-click start for a calendar event, surfacing any failure.
+    func start(event: CalendarEvent) async {
+        await startReportingErrors(.event(event))
     }
 
     /// One-click start for a specific calendar event (by id).
@@ -109,8 +125,19 @@ final class RecordingSessionService {
         do {
             try await start(request)
         } catch {
-            await reportStartFailure(error.localizedDescription)
+            await reportStartFailure(error.localizedDescription, permission: nil, retry: request)
         }
+    }
+
+    /// Run the failed start again.
+    func retryFailedStart() async {
+        guard let request = startFailure?.retry else { return }
+        startFailure = nil
+        await startReportingErrors(request)
+    }
+
+    func dismissStartFailure() {
+        startFailure = nil
     }
 
     private func begin(_ c: RecordingController, meetingID: UUID, eventID: String?) {
@@ -123,25 +150,20 @@ final class RecordingSessionService {
     }
 
     /// Runs the controller's start and cleans up if it ends in an error.
-    private func run(_ c: RecordingController, _ body: () async -> Void) async {
+    private func run(_ c: RecordingController, retry: MeetingStartRequest?, _ body: () async -> Void) async {
         await body()
         if case .error(let message) = c.state, controller === c {
             controller = nil
             DockIconManager.clearRecordingBadge()
             env.bannerCoordinator.recordingFailed()
             env.meetingEndDetector.recordingDidStop()
-            await reportStartFailure(message)
+            await reportStartFailure(message, permission: c.failedPermission, retry: retry)
         }
     }
 
-    private func reportStartFailure(_ message: String) async {
-        lastStartError = message
+    private func reportStartFailure(_ message: String, permission: RecordingPermission?, retry: MeetingStartRequest?) async {
+        startFailure = StartFailure(message: message, permission: permission, retry: retry)
         await env.notifications.postRecordingStartFailed(message)
-        // Clear the overlay's error state after a while.
-        Task {
-            try? await Task.sleep(for: .seconds(15))
-            if self.lastStartError == message { self.lastStartError = nil }
-        }
     }
 
     // MARK: - Stop

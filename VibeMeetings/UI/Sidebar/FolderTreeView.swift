@@ -16,7 +16,9 @@ struct FolderTreeView: View {
     @State private var renameTarget: RenameTarget?
     @State private var deleteTarget: DeleteTarget?
     @State private var bulkDeleteItems: [BulkDeleteItem]?
-    @State private var viewMode: SidebarViewMode = .recent
+    @AppStorage("VibeMeetings.Sidebar.ViewMode") private var viewMode: SidebarViewMode = .recent
+    @FocusState private var searchFocused: Bool
+    @State private var isSearchingContent = false
     @State private var searchText = ""
     @State private var contentMatchIDs: Set<UUID> = []
     @State private var searchTask: Task<Void, Never>?
@@ -37,6 +39,13 @@ struct FolderTreeView: View {
                 TextField("Search meetings…", text: $searchText)
                     .textFieldStyle(.plain)
                     .font(.callout)
+                    .focused($searchFocused)
+                    .accessibilityLabel("Search meetings")
+                    .onExitCommand { searchText = ""; contentMatchIDs.removeAll(); searchFocused = false }
+                if isSearchingContent {
+                    ProgressView().controlSize(.mini)
+                        .help("Searching transcripts and summaries…")
+                }
                 if !searchText.isEmpty {
                     Button {
                         searchText = ""
@@ -47,6 +56,7 @@ struct FolderTreeView: View {
                             .font(.caption)
                     }
                     .buttonStyle(.plain)
+                    .accessibilityLabel("Clear search")
                 }
             }
             .padding(8)
@@ -55,11 +65,12 @@ struct FolderTreeView: View {
             .padding(.top, 8)
             .padding(.bottom, 4)
 
-            Picker("", selection: $viewMode) {
+            Picker("View", selection: $viewMode) {
                 ForEach(SidebarViewMode.allCases, id: \.self) { mode in
                     Text(mode.rawValue).tag(mode)
                 }
             }
+            .labelsHidden()
             .pickerStyle(.segmented)
             .padding(.horizontal, 12)
             .padding(.vertical, 4)
@@ -77,24 +88,51 @@ struct FolderTreeView: View {
             debounceContentSearch()
         }
         .task {
-            upcomingEvents = await env.calendarService.upcomingEvents(within: 24 * 60 * 60)
+            // Keep "Upcoming" current: it used to load once, so the "Now" state
+            // went stale and a meeting that had just started vanished.
+            while !Task.isCancelled {
+                upcomingEvents = await env.calendarService.upcomingEvents(within: 24 * 60 * 60)
+                try? await Task.sleep(for: .seconds(60))
+            }
+        }
+        .onChange(of: env.appRouter.pendingNewFolder) {
+            if env.appRouter.pendingNewFolder {
+                env.appRouter.pendingNewFolder = false
+                requestNewFolder()
+            }
+        }
+        .background {
+            // ⌥⌘F — search the meeting list (⌘F stays "find in this transcript").
+            Button("Search meetings") { searchFocused = true }
+                .keyboardShortcut("f", modifiers: [.command, .option])
+                .hidden()
         }
         .toolbar {
             ToolbarItem(placement: .primaryAction) {
                 Button {
                     env.appRouter.requestNewMeeting()
                 } label: {
-                    Label("New Recording", systemImage: "record.circle")
+                    Label("New meeting", systemImage: "record.circle")
                 }
                 .buttonStyle(.borderedProminent)
                 .tint(.red)
-                .help("Start a new recording (⌘N)")
+                .help("Start a new meeting (⌘N)")
+            }
+            ToolbarItem(placement: .primaryAction) {
+                Button {
+                    requestNewFolder()
+                } label: {
+                    Label("New folder", systemImage: "folder.badge.plus")
+                }
+                .help("New folder (⇧⌘N)")
             }
         }
         .sheet(item: $newFolderTarget) { target in
-            NewFolderSheet(parent: target) { name in
+            NewFolderSheet(parent: target, isRoot: target.id == root?.id) { name in
                 Task {
-                    _ = try? await env.meetingStore.createFolder(at: target, name: name)
+                    await env.attempt("create the folder") {
+                        _ = try await env.meetingStore.createFolder(at: target, name: name)
+                    }
                     // Refresh the tree before dismissing so the new folder is
                     // visible in the sidebar the moment the sheet closes.
                     await env.refreshFolderTree()
@@ -107,10 +145,11 @@ struct FolderTreeView: View {
                 Task {
                     switch target {
                     case .folder(let node):
-                        try? await env.meetingStore.renameFolder(node, to: newName)
+                        await env.attempt("rename the folder") { try await env.meetingStore.renameFolder(node, to: newName) }
                     case .meeting(let id, _):
-                        try? await env.meetingStore.renameMeeting(id: id, to: newName)
+                        await env.attempt("rename the meeting") { try await env.meetingStore.renameMeeting(id: id, to: newName) }
                     }
+                    await env.refreshFolderTree()
                     renameTarget = nil
                 }
             } onCancel: { renameTarget = nil }
@@ -120,14 +159,10 @@ struct FolderTreeView: View {
             case .folder(let node):
                 return Alert(
                     title: Text("Delete \"\(node.name)\"?"),
-                    message: Text("This folder and any meetings inside it will be moved to the Trash."),
+                    message: Text("This folder and any meetings inside it will be moved to the Trash. You can restore them from there."),
                     primaryButton: .destructive(Text("Move to Trash")) {
                         Task {
-                            do {
-                                try await env.meetingStore.deleteFolder(node)
-                            } catch {
-                                print("[Delete] failed to delete folder \(node.name): \(error)")
-                            }
+                            await env.attempt("delete the folder") { try await env.meetingStore.deleteFolder(node) }
                             selection.remove(.folder(node.url))
                             await env.refreshFolderTree()
                         }
@@ -135,41 +170,22 @@ struct FolderTreeView: View {
                     secondaryButton: .cancel()
                 )
             case .meeting(let id, let title, let hasAudio):
-                if hasAudio {
-                    return Alert(
-                        title: Text("Delete \"\(title)\"?"),
-                        message: Text("Move the meeting (including its audio) to the Trash?"),
-                        primaryButton: .destructive(Text("Delete with audio")) {
-                            Task {
-                                do {
-                                    try await env.meetingStore.deleteMeeting(id: id, deleteAudio: true)
-                                } catch {
-                                    print("[Delete] failed to delete meeting \(id): \(error)")
-                                }
-                                selection.remove(.meeting(id))
-                                await env.refreshFolderTree()
+                return Alert(
+                    title: Text("Delete \"\(title)\"?"),
+                    message: Text(hasAudio
+                                  ? "The meeting and its audio recording will be moved to the Trash. You can restore them from there."
+                                  : "The meeting will be moved to the Trash. You can restore it from there."),
+                    primaryButton: .destructive(Text("Move to Trash")) {
+                        Task {
+                            await env.attempt("delete the meeting") {
+                                try await env.meetingStore.deleteMeeting(id: id, deleteAudio: hasAudio)
                             }
-                        },
-                        secondaryButton: .cancel()
-                    )
-                } else {
-                    return Alert(
-                        title: Text("Delete \"\(title)\"?"),
-                        message: Text("This meeting will be moved to the Trash."),
-                        primaryButton: .destructive(Text("Move to Trash")) {
-                            Task {
-                                do {
-                                    try await env.meetingStore.deleteMeeting(id: id, deleteAudio: false)
-                                } catch {
-                                    print("[Delete] failed to delete meeting \(id): \(error)")
-                                }
-                                selection.remove(.meeting(id))
-                                await env.refreshFolderTree()
-                            }
-                        },
-                        secondaryButton: .cancel()
-                    )
-                }
+                            selection.remove(.meeting(id))
+                            await env.refreshFolderTree()
+                        }
+                    },
+                    secondaryButton: .cancel()
+                )
             }
         }
         .alert(
@@ -185,9 +201,9 @@ struct FolderTreeView: View {
                     for item in items {
                         switch item {
                         case .folder(let node):
-                            try? await env.meetingStore.deleteFolder(node)
+                            await env.attempt("delete “\(node.name)”") { try await env.meetingStore.deleteFolder(node) }
                         case .meeting(let id):
-                            try? await env.meetingStore.deleteMeeting(id: id, deleteAudio: true)
+                            await env.attempt("delete a meeting") { try await env.meetingStore.deleteMeeting(id: id, deleteAudio: true) }
                         }
                     }
                     selection.removeAll()
@@ -203,7 +219,7 @@ struct FolderTreeView: View {
                     meetings > 0 ? "\(meetings) meeting\(meetings == 1 ? "" : "s")" : nil,
                     folders > 0 ? "\(folders) folder\(folders == 1 ? "" : "s")" : nil
                 ].compactMap { $0 }.joined(separator: " and ")
-                Text("Move \(parts) to the Trash? This cannot be undone.")
+                Text("\(parts.prefix(1).uppercased() + parts.dropFirst()) will be moved to the Trash, including any audio recordings. You can restore them from there.")
             }
         }
         .onDeleteCommand {
@@ -241,30 +257,30 @@ struct FolderTreeView: View {
         searchTask = Task {
             try? await Task.sleep(for: .milliseconds(300))
             guard !Task.isCancelled else { return }
+            isSearchingContent = true
             let matches = await searchContent(query: currentQuery)
             guard !Task.isCancelled else { return }
             contentMatchIDs = matches
+            isSearchingContent = false
         }
     }
 
     private func searchContent(query: String) async -> Set<UUID> {
         guard let root else { return [] }
-        var items: [MeetingItem] = []
-        collectMeetings(from: root, parentName: nil, into: &items)
-
         var matches = Set<UUID>()
-        for item in items {
+        for meeting in root.allMeetings {
+            if Task.isCancelled { break }
             // Already matched by title — skip disk read.
-            if item.meeting.title.lowercased().contains(query) { continue }
-            // Check transcript and summary on disk.
-            if let transcript = try? await env.meetingStore.loadSummary(for: item.meeting.id),
-               transcript.lowercased().contains(query) {
-                matches.insert(item.meeting.id)
+            if meeting.title.lowercased().contains(query) { continue }
+            // Check the summary, then the transcript, on disk.
+            if let summary = try? await env.meetingStore.loadSummary(for: meeting.id),
+               summary.lowercased().contains(query) {
+                matches.insert(meeting.id)
                 continue
             }
-            if let segments = try? await env.meetingStore.loadTranscript(for: item.meeting.id),
+            if let segments = try? await env.meetingStore.loadTranscript(for: meeting.id),
                segments.contains(where: { $0.text.lowercased().contains(query) }) {
-                matches.insert(item.meeting.id)
+                matches.insert(meeting.id)
             }
         }
         return matches
@@ -286,7 +302,7 @@ struct FolderTreeView: View {
                             recentRow(meeting: item.meeting, folderName: item.folderName)
                                 .tag(SidebarSelection.meeting(item.meeting.id))
                                 .contextMenu {
-                                    if let node = findMeetingNode(id: item.meeting.id, in: root) {
+                                    if let node = root.meetingNode(id: item.meeting.id) {
                                         contextMenu(for: node)
                                     }
                                 }
@@ -317,11 +333,15 @@ struct FolderTreeView: View {
                 .listStyle(.sidebar)
             }
         } else {
-            ContentUnavailableView(
-                "No meetings yet",
-                systemImage: "folder",
-                description: Text("Create a folder, then start a meeting (⌘N).")
-            )
+            ContentUnavailableView {
+                Label("No meetings yet", systemImage: "folder")
+            } description: {
+                Text("Start a meeting, or create a folder to keep them in.")
+            } actions: {
+                Button("New meeting…") { env.appRouter.requestNewMeeting() }
+                    .buttonStyle(.borderedProminent)
+                Button("New folder…") { requestNewFolder() }
+            }
         }
     }
 
@@ -335,11 +355,14 @@ struct FolderTreeView: View {
         if isSearching && filtered.isEmpty {
             ContentUnavailableView.search(text: searchText)
         } else if meetings.isEmpty && !isSearching {
-            ContentUnavailableView(
-                "No meetings yet",
-                systemImage: "waveform.badge.mic",
-                description: Text("Start a meeting with ⌘N.")
-            )
+            ContentUnavailableView {
+                Label("No meetings yet", systemImage: "waveform.badge.mic")
+            } description: {
+                Text("Start a meeting with ⌘N, or from the menu bar.")
+            } actions: {
+                Button("New meeting…") { env.appRouter.requestNewMeeting() }
+                    .buttonStyle(.borderedProminent)
+            }
         } else {
             List(selection: $selection) {
                 // Upcoming meetings from calendar (only when not searching).
@@ -364,7 +387,7 @@ struct FolderTreeView: View {
                             recentRow(meeting: item.meeting, folderName: item.folderName)
                                 .tag(SidebarSelection.meeting(item.meeting.id))
                                 .contextMenu {
-                                    if let root, let node = findMeetingNode(id: item.meeting.id, in: root) {
+                                    if let root, let node = root.meetingNode(id: item.meeting.id) {
                                         contextMenu(for: node)
                                     }
                                 }
@@ -381,9 +404,11 @@ struct FolderTreeView: View {
     // MARK: - Upcoming calendar events
 
     private var futureCalendarEvents: [CalendarEvent] {
+        // Includes a meeting that has already started — that is exactly when
+        // you most want to record it — until it ends.
         let now = Date()
         return upcomingEvents
-            .filter { $0.startDate > now }
+            .filter { $0.endDate > now }
             .sorted { $0.startDate < $1.startDate }
     }
 
@@ -399,9 +424,21 @@ struct FolderTreeView: View {
                         Text(event.title).lineLimit(1).font(.callout)
                         PlatformBadge(event: event)
                     }
-                    Text(event.startDate, format: .dateTime.hour().minute())
-                        .font(.caption2)
-                        .foregroundStyle(.secondary)
+                    HStack(spacing: 4) {
+                        if event.startDate <= Date() {
+                            Text("Now")
+                                .font(.caption2.bold())
+                                .foregroundStyle(.red)
+                            Text("· until")
+                                .foregroundStyle(.secondary)
+                            Text(event.endDate, format: .dateTime.hour().minute())
+                                .foregroundStyle(.secondary)
+                        } else {
+                            Text(event.startDate, format: .dateTime.hour().minute())
+                                .foregroundStyle(.secondary)
+                        }
+                    }
+                    .font(.caption2)
                 }
                 Spacer()
             }
@@ -434,8 +471,10 @@ struct FolderTreeView: View {
         Task { await env.recordingService.joinAndRecord(event: event) }
     }
 
+    /// Starts recording straight away (like "Join & Record"), instead of opening a
+    /// sheet — two similarly named buttons used to behave differently.
     private func startRecording(event: CalendarEvent) {
-        env.appRouter.requestNewMeeting(preselectEventID: event.id)
+        Task { await env.recordingService.start(event: event) }
     }
 
     // MARK: - Date grouping
@@ -522,6 +561,7 @@ struct FolderTreeView: View {
             Image(systemName: "waveform")
         }
         .draggable(meeting.id.uuidString)
+        .accessibilityElement(children: .combine)
     }
 
     // MARK: - rows
@@ -545,7 +585,7 @@ struct FolderTreeView: View {
                 .dropDestination(for: String.self) { items, _ in
                     guard let idStr = items.first, let id = UUID(uuidString: idStr) else { return false }
                     Task {
-                        try? await env.meetingStore.moveMeeting(id: id, to: node)
+                        await env.attempt("move the meeting") { try await env.meetingStore.moveMeeting(id: id, to: node) }
                         await env.refreshFolderTree()
                     }
                     return true
@@ -565,13 +605,14 @@ struct FolderTreeView: View {
         if node.isMeeting, let meeting = node.meeting {
             Button("Rename…") { renameTarget = .meeting(id: meeting.id, currentName: meeting.title) }
             if let root {
-                let folders = collectFolders(in: root)
+                let folders = root.allFolders
                 if !folders.isEmpty {
                     Menu("Move to…") {
                         ForEach(folders, id: \.id) { folder in
-                            Button(folder.name) {
+                            // Full path, so two folders called "Weekly" can be told apart.
+                            Button(folder.displayPath(relativeTo: env.rootURL)) {
                                 Task {
-                                    try? await env.meetingStore.moveMeeting(id: meeting.id, to: folder)
+                                    await env.attempt("move the meeting") { try await env.meetingStore.moveMeeting(id: meeting.id, to: folder) }
                                     await env.refreshFolderTree()
                                 }
                             }
@@ -603,13 +644,19 @@ struct FolderTreeView: View {
         guard let sel = selection.single else { return nil }
         switch sel {
         case .folder(let url):
-            return findNode(at: url, in: root)
+            return root.node(at: url)
         case .meeting(let id):
-            if let meetingNode = findMeetingNode(id: id, in: root) {
-                return findParent(of: meetingNode, in: root)
+            if let meetingNode = root.meetingNode(id: id) {
+                return root.parent(of: meetingNode)
             }
             return nil
         }
+    }
+
+    /// New folder in the selected folder (or the selected meeting's folder), else at the top level.
+    private func requestNewFolder() {
+        guard let target = currentFolder() ?? root else { return }
+        newFolderTarget = target
     }
 
     /// Build bulk-delete items from the current selection and present the
@@ -620,7 +667,7 @@ struct FolderTreeView: View {
         for sel in selection {
             switch sel {
             case .folder(let url):
-                if let node = findNode(at: url, in: root) {
+                if let node = root.node(at: url) {
                     items.append(.folder(node))
                 }
             case .meeting(let id):
@@ -644,66 +691,29 @@ enum BulkDeleteItem: Identifiable {
     }
 }
 
-/// Collects all non-meeting folder nodes from the tree (for "Move to…" menu).
-private func collectFolders(in node: FolderNode) -> [FolderNode] {
-    var result: [FolderNode] = []
-    if !node.isMeeting {
-        result.append(node)
-        for child in node.children {
-            result.append(contentsOf: collectFolders(in: child))
-        }
-    }
-    return result
-}
-
 private extension FolderNode {
     var optionalChildren: [FolderNode]? {
         children.isEmpty ? nil : children
     }
 }
 
-// MARK: - Tree lookup helpers
-
-private func findNode(at url: URL, in node: FolderNode) -> FolderNode? {
-    if node.url.standardizedFileURL == url.standardizedFileURL { return node }
-    for child in node.children {
-        if let hit = findNode(at: url, in: child) { return hit }
-    }
-    return nil
-}
-
-private func findMeetingNode(id: UUID, in node: FolderNode) -> FolderNode? {
-    if node.isMeeting, node.meeting?.id == id { return node }
-    for child in node.children {
-        if let hit = findMeetingNode(id: id, in: child) { return hit }
-    }
-    return nil
-}
-
-private func findParent(of target: FolderNode, in node: FolderNode) -> FolderNode? {
-    if node.children.contains(where: { $0.id == target.id }) { return node }
-    for child in node.children {
-        if let hit = findParent(of: target, in: child) { return hit }
-    }
-    return nil
-}
-
 // MARK: - Sheets
 
 private struct NewFolderSheet: View {
     let parent: FolderNode
+    let isRoot: Bool
     let onCreate: (String) -> Void
     let onCancel: () -> Void
     @State private var name: String = "New Folder"
 
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
-            Text("New folder in \(parent.name)").font(.headline)
+            Text(isRoot ? "New top-level folder" : "New folder in \(parent.name)").font(.headline)
             TextField("Folder name", text: $name)
                 .textFieldStyle(.roundedBorder)
             HStack {
                 Spacer()
-                Button("Cancel", action: onCancel).keyboardShortcut(.escape)
+                Button("Cancel", action: onCancel).keyboardShortcut(.cancelAction)
                 Button("Create") { onCreate(name) }
                     .keyboardShortcut(.defaultAction)
                     .buttonStyle(.borderedProminent)
@@ -761,7 +771,7 @@ private struct RenameSheet: View {
                 .textFieldStyle(.roundedBorder)
             HStack {
                 Spacer()
-                Button("Cancel", action: onCancel).keyboardShortcut(.escape)
+                Button("Cancel", action: onCancel).keyboardShortcut(.cancelAction)
                 Button("Rename") { onConfirm(name) }
                     .keyboardShortcut(.defaultAction)
                     .buttonStyle(.borderedProminent)

@@ -1,12 +1,26 @@
+import EventKit
 import SwiftUI
-import VMCore
 import VMCalendar
+import VMCore
 import VMStorage
 
 struct DashboardView: View {
     @Environment(AppEnvironment.self) private var env
     @State private var calendarEvents: [CalendarEvent] = []
+    @State private var calendarStatus: EKAuthorizationStatus = EKEventStore.authorizationStatus(for: .event)
+    @State private var stats = Stats()
     let onSelectMeeting: (UUID) -> Void
+
+    /// Derived from the library once per change, not on every render. (It used to
+    /// walk the whole tree and `stat()` a file per meeting inside `body`, several times.)
+    private struct Stats {
+        var recent: [Meeting] = []
+        var meetingsThisWeek = 0
+        var hoursThisWeek = 0.0
+        var oneOnOnesThisWeek = 0
+        var withoutSummary = 0
+        var summaryIDs: Set<UUID> = []
+    }
 
     var body: some View {
         ScrollView {
@@ -21,8 +35,14 @@ struct DashboardView: View {
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .background(.background)
         .task {
-            calendarEvents = await env.calendarService.upcomingEvents(within: 12 * 60 * 60)
+            // Keep the schedule current ("Now" badges go stale otherwise).
+            while !Task.isCancelled {
+                calendarStatus = env.calendarService.authorizationStatus()
+                calendarEvents = await env.calendarService.upcomingEvents(within: 24 * 60 * 60)
+                try? await Task.sleep(for: .seconds(60))
+            }
         }
+        .task(id: env.folderTree.map { ObjectIdentifier($0) }) { await recomputeStats() }
     }
 
     // MARK: - Header
@@ -46,36 +66,67 @@ struct DashboardView: View {
         }
     }
 
-    // MARK: - Today's Schedule
+    // MARK: - Today's schedule
+
+    /// Events that start today and haven't finished.
+    private var todaysEvents: [CalendarEvent] {
+        let now = Date.now
+        return calendarEvents
+            .filter { Calendar.current.isDateInToday($0.startDate) && $0.endDate > now }
+            .sorted { $0.startDate < $1.startDate }
+    }
+
+    private var calendarAccessGranted: Bool {
+        calendarStatus == .fullAccess || calendarStatus == .authorized
+    }
 
     private var todaysScheduleSection: some View {
         VStack(alignment: .leading, spacing: 12) {
-            Label("Today's Schedule", systemImage: "calendar")
+            Label("Today's schedule", systemImage: "calendar")
                 .font(.headline)
 
-            if calendarEvents.isEmpty {
-                HStack {
-                    Spacer()
-                    VStack(spacing: 8) {
-                        Image(systemName: "calendar.badge.checkmark")
-                            .font(.title2)
-                            .foregroundStyle(.secondary)
-                        Text("No upcoming meetings today")
-                            .foregroundStyle(.secondary)
+            if !calendarAccessGranted {
+                placeholder(
+                    symbol: "calendar.badge.exclamationmark",
+                    text: "Calendar access is off, so meetings can't be shown here."
+                ) {
+                    if calendarStatus == .notDetermined {
+                        Button("Allow calendar access") {
+                            Task { calendarStatus = await env.calendarService.requestAccess() }
+                        }
+                    } else if let url = URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_Calendars") {
+                        Button("Open Calendar settings…") { NSWorkspace.shared.open(url) }
                     }
-                    .padding(.vertical, 20)
-                    Spacer()
                 }
-                .background(.fill.quaternary, in: RoundedRectangle(cornerRadius: 10))
+            } else if todaysEvents.isEmpty {
+                placeholder(symbol: "calendar.badge.checkmark", text: "Nothing else on your calendar today") { EmptyView() }
             } else {
                 VStack(spacing: 1) {
-                    ForEach(calendarEvents) { event in
+                    ForEach(todaysEvents) { event in
                         calendarEventRow(event)
                     }
                 }
                 .clipShape(RoundedRectangle(cornerRadius: 10))
             }
         }
+    }
+
+    private func placeholder<Actions: View>(symbol: String, text: String, @ViewBuilder actions: () -> Actions) -> some View {
+        HStack {
+            Spacer()
+            VStack(spacing: 8) {
+                Image(systemName: symbol)
+                    .font(.title2)
+                    .foregroundStyle(.secondary)
+                    .accessibilityHidden(true)
+                Text(text)
+                    .foregroundStyle(.secondary)
+                actions()
+            }
+            .padding(.vertical, 20)
+            Spacer()
+        }
+        .background(.fill.quaternary, in: RoundedRectangle(cornerRadius: 10))
     }
 
     private func calendarEventRow(_ event: CalendarEvent) -> some View {
@@ -95,32 +146,27 @@ struct DashboardView: View {
                         .font(.body.weight(isActive ? .semibold : .regular))
                         .lineLimit(1)
                     HStack(spacing: 6) {
-                        Text(formatTimeRange(start: event.startDate, end: event.endDate))
+                        // Locale-aware: honours the user's 12/24-hour setting.
+                        Text("\(event.startDate.formatted(date: .omitted, time: .shortened)) – \(event.endDate.formatted(date: .omitted, time: .shortened))")
                             .font(.caption)
                             .foregroundStyle(.secondary)
                         PlatformBadge(event: event)
                         if !event.attendeeNames.isEmpty {
                             Text("\(event.attendeeNames.count) attendees")
                                 .font(.caption)
-                                .foregroundStyle(.tertiary)
+                                .foregroundStyle(.secondary)
                         }
                     }
                 }
 
                 Spacer()
 
-                if isActive {
-                    Text("Now")
-                        .font(.caption.bold())
-                        .foregroundStyle(.green)
-                        .padding(.horizontal, 8)
-                        .padding(.vertical, 3)
-                        .background(.green.opacity(0.15), in: Capsule())
-                }
+                if isActive { Badge(text: "Now", color: .green) }
 
                 Image(systemName: "chevron.right")
                     .font(.caption)
                     .foregroundStyle(.tertiary)
+                    .accessibilityHidden(true)
             }
             .padding(.horizontal, 14)
             .padding(.vertical, 10)
@@ -128,45 +174,23 @@ struct DashboardView: View {
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
+        .help("Record “\(event.title)”")
     }
 
-    private func formatTimeRange(start: Date, end: Date) -> String {
-        let formatter = DateFormatter()
-        formatter.dateFormat = "HH:mm"
-        return "\(formatter.string(from: start)) – \(formatter.string(from: end))"
-    }
-
-    // MARK: - Recent Meetings
-
-    private var allMeetings: [Meeting] {
-        guard let root = env.folderTree else { return [] }
-        return collectAllMeetings(from: root)
-            .sorted { $0.startedAt > $1.startedAt }
-    }
+    // MARK: - Recent meetings
 
     private var recentMeetingsSection: some View {
         VStack(alignment: .leading, spacing: 12) {
-            Label("Recent Meetings", systemImage: "clock.arrow.circlepath")
+            Label("Recent meetings", systemImage: "clock.arrow.circlepath")
                 .font(.headline)
 
-            let recent = Array(allMeetings.prefix(5))
-            if recent.isEmpty {
-                HStack {
-                    Spacer()
-                    VStack(spacing: 8) {
-                        Image(systemName: "waveform.badge.mic")
-                            .font(.title2)
-                            .foregroundStyle(.secondary)
-                        Text("No meetings yet")
-                            .foregroundStyle(.secondary)
-                    }
-                    .padding(.vertical, 20)
-                    Spacer()
+            if stats.recent.isEmpty {
+                placeholder(symbol: "waveform.badge.mic", text: "No meetings yet") {
+                    Button("Start a meeting") { env.appRouter.requestNewMeeting() }
                 }
-                .background(.fill.quaternary, in: RoundedRectangle(cornerRadius: 10))
             } else {
                 VStack(spacing: 1) {
-                    ForEach(recent) { meeting in
+                    ForEach(stats.recent) { meeting in
                         recentMeetingRow(meeting)
                     }
                 }
@@ -191,34 +215,25 @@ struct DashboardView: View {
                         if let duration = meeting.duration {
                             Text(formatDuration(duration))
                                 .font(.caption)
-                                .foregroundStyle(.tertiary)
-                        }
-                        meetingTypeBadge(meeting.resolvedType)
-                        if let org = meeting.org, !org.isEmpty {
-                            Text(org)
-                                .font(.caption2)
                                 .foregroundStyle(.secondary)
-                                .padding(.horizontal, 5)
-                                .padding(.vertical, 1)
-                                .background(.fill.tertiary, in: Capsule())
+                        }
+                        Badge(text: meeting.resolvedType.badgeLabel, color: meeting.resolvedType.badgeColor)
+                        if let org = meeting.org, !org.isEmpty {
+                            Badge(text: org)
                         }
                     }
                 }
 
                 Spacer()
 
-                if !hasSummary(for: meeting) {
-                    Text("Needs summary")
-                        .font(.caption2.bold())
-                        .foregroundStyle(.orange)
-                        .padding(.horizontal, 8)
-                        .padding(.vertical, 3)
-                        .background(.orange.opacity(0.12), in: Capsule())
+                if !stats.summaryIDs.contains(meeting.id) {
+                    Badge(text: "No summary", color: .orange)
                 }
 
                 Image(systemName: "chevron.right")
                     .font(.caption)
                     .foregroundStyle(.tertiary)
+                    .accessibilityHidden(true)
             }
             .padding(.horizontal, 14)
             .padding(.vertical, 10)
@@ -228,63 +243,26 @@ struct DashboardView: View {
         .buttonStyle(.plain)
     }
 
-    private func meetingTypeBadge(_ type: MeetingType) -> some View {
-        let label = type == .oneOnOne ? "1:1" : "Group"
-        let color: Color = type == .oneOnOne ? .blue : .indigo
-        return Text(label)
-            .font(.caption2.bold())
-            .foregroundStyle(color)
-            .padding(.horizontal, 6)
-            .padding(.vertical, 2)
-            .background(color.opacity(0.12), in: Capsule())
-    }
-
     private func formatDuration(_ ti: TimeInterval) -> String {
         let minutes = Int(ti) / 60
-        if minutes < 60 {
-            return "\(minutes)m"
-        }
+        if minutes < 60 { return "\(minutes)m" }
         let hours = minutes / 60
         let rem = minutes % 60
         return rem > 0 ? "\(hours)h \(rem)m" : "\(hours)h"
     }
 
-    // MARK: - Quick Stats
+    // MARK: - Quick stats
 
     private var quickStatsSection: some View {
-        let meetings = allMeetings
-        let calendar = Calendar.current
-        let startOfWeek = calendar.dateInterval(of: .weekOfYear, for: .now)?.start ?? .now
-        let thisWeek = meetings.filter { $0.startedAt >= startOfWeek }
-
-        let totalMinutes = thisWeek.compactMap(\.duration).reduce(0, +) / 60
-        let pendingSummaries = meetings.filter { !hasSummary(for: $0) }.count
-        let oneOnOnes = thisWeek.filter { $0.resolvedType == .oneOnOne }.count
-
-        return HStack(spacing: 16) {
+        HStack(spacing: 16) {
+            statCard(title: "Meetings this week", value: "\(stats.meetingsThisWeek)", icon: "calendar.badge.clock", color: .blue)
+            statCard(title: "Hours this week", value: String(format: "%.1f", stats.hoursThisWeek), icon: "clock", color: .green)
+            statCard(title: "1:1s this week", value: "\(stats.oneOnOnesThisWeek)", icon: "person.2", color: .purple)
             statCard(
-                title: "This Week",
-                value: "\(thisWeek.count)",
-                icon: "calendar.badge.clock",
-                color: .blue
-            )
-            statCard(
-                title: "Total Hours",
-                value: String(format: "%.1f", Double(totalMinutes) / 60.0),
-                icon: "clock",
-                color: .green
-            )
-            statCard(
-                title: "Pending Summaries",
-                value: "\(pendingSummaries)",
+                title: "Without a summary",
+                value: "\(stats.withoutSummary)",
                 icon: "doc.text",
-                color: pendingSummaries > 0 ? .orange : .secondary
-            )
-            statCard(
-                title: "1:1s This Week",
-                value: "\(oneOnOnes)",
-                icon: "person.2",
-                color: .purple
+                color: stats.withoutSummary > 0 ? .orange : .secondary
             )
         }
     }
@@ -294,6 +272,7 @@ struct DashboardView: View {
             Image(systemName: icon)
                 .font(.title3)
                 .foregroundStyle(color)
+                .accessibilityHidden(true)
             Text(value)
                 .font(.title.bold())
                 .foregroundStyle(color)
@@ -305,33 +284,34 @@ struct DashboardView: View {
         .frame(maxWidth: .infinity)
         .padding(.vertical, 16)
         .background(.fill.quaternary, in: RoundedRectangle(cornerRadius: 10))
+        .accessibilityElement(children: .combine)
     }
 
-    // MARK: - Helpers
+    // MARK: - Derived data
 
-    private func collectAllMeetings(from node: FolderNode) -> [Meeting] {
-        var result: [Meeting] = []
-        if let meeting = node.meeting {
-            result.append(meeting)
-        }
-        for child in node.children {
-            result.append(contentsOf: collectAllMeetings(from: child))
-        }
-        return result
-    }
-
-    private func hasSummary(for meeting: Meeting) -> Bool {
-        guard let root = env.folderTree else { return false }
-        guard let node = findMeetingNode(id: meeting.id, in: root) else { return false }
-        let summaryURL = node.url.appendingPathComponent(MeetingFolder.summaryFilename)
-        return FileManager.default.fileExists(atPath: summaryURL.path)
-    }
-
-    private func findMeetingNode(id: UUID, in node: FolderNode) -> FolderNode? {
-        if node.isMeeting, node.meeting?.id == id { return node }
-        for child in node.children {
-            if let hit = findMeetingNode(id: id, in: child) { return hit }
-        }
-        return nil
+    private func recomputeStats() async {
+        guard let root = env.folderTree else { stats = Stats(); return }
+        let nodes = root.allMeetingNodes
+        // Disk checks off the main actor.
+        let result: Stats = await Task.detached(priority: .userInitiated) {
+            let startOfWeek = Calendar.current.dateInterval(of: .weekOfYear, for: .now)?.start ?? .now
+            var s = Stats()
+            let sorted = nodes.compactMap { node in node.meeting.map { ($0, node.url) } }
+                .sorted { $0.0.startedAt > $1.0.startedAt }
+            let fm = FileManager.default
+            for (meeting, url) in sorted {
+                if fm.fileExists(atPath: url.appendingPathComponent(MeetingFolder.summaryFilename).path) {
+                    s.summaryIDs.insert(meeting.id)
+                }
+            }
+            s.recent = Array(sorted.prefix(5).map(\.0))
+            let week = sorted.map(\.0).filter { $0.startedAt >= startOfWeek }
+            s.meetingsThisWeek = week.count
+            s.hoursThisWeek = week.compactMap(\.duration).reduce(0, +) / 3600
+            s.oneOnOnesThisWeek = week.filter { $0.resolvedType == .oneOnOne }.count
+            s.withoutSummary = sorted.count - s.summaryIDs.count
+            return s
+        }.value
+        stats = result
     }
 }

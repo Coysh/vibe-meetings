@@ -2,356 +2,195 @@ import SwiftUI
 import VMCalendar
 import VMCore
 import VMRecording
-import VMSummarization
-import VMTranscription
-import VMStorage
 
-/// Floating recording controller. Bound to a single in-progress meeting;
-/// owns the `AudioCaptureCoordinator` and the live transcription pipeline.
-@MainActor
-@Observable
-final class RecordingController {
-    var state: CaptureState = .idle
-    var elapsed: TimeInterval = 0
-    var micLevel: Float = -120
-    var systemLevel: Float = -120
-    var liveSegments: [TranscriptSegment] = []
-    var meetingHandle: MeetingHandle?
-
-    /// The calendar event linked to this recording, if any. Used for auto-end detection.
-    var linkedCalendarEvent: CalendarEvent?
-
-    /// User's free-form notes taken during the meeting.
-    var notes: String = ""
-
-    /// Tracks the echo reduction background task so callers can await it.
-    var echoReductionTask: Task<Bool, Never>?
-
-    private let env: AppEnvironment
-    private let coordinator = AudioCaptureCoordinator()
-    private let merger = SegmentMerger()
-    private var streamTasks: [Task<Void, Never>] = []
-    private var clockTask: Task<Void, Never>?
-    private var pumpTask: Task<Void, Never>?
-    /// Periodically flushes the live transcript to disk so a crash mid-meeting
-    /// never loses more than one interval's worth of speech.
-    private var checkpointTask: Task<Void, Never>?
-    private static let checkpointInterval: Duration = .seconds(10)
-    /// Tracks the last mic UID we configured so we can detect settings changes.
-    private var currentMicUID: String?
-    /// When resuming an existing meeting, the new capture session starts its
-    /// clock at ~0. This offset shifts incoming live segments so they land
-    /// *after* the loaded history instead of colliding with it. 0 for a fresh
-    /// recording.
-    private var timelineOffset: TimeInterval = 0
-
-    init(env: AppEnvironment) {
-        self.env = env
-    }
-
-    deinit {
-        print("[RecordingController] DEINIT — RecordingController is being deallocated!")
-    }
-
-    /// Resume recording for an existing meeting. Loads the previously saved
-    /// segments so they appear in the live view, then starts a new audio
-    /// capture session. The new audio replaces the old audio file.
-    func resume(handle: MeetingHandle) async {
-        // Load existing segments so the live view shows the full history.
-        if let existing = try? await env.meetingStore.loadTranscript(for: handle.meeting.id) {
-            for seg in existing {
-                merger.ingest(seg)
-            }
-            // The fresh capture session below restarts the clock at ~0, so
-            // offset the new live segments past the end of the loaded history
-            // to avoid overlapping timestamps (which would otherwise interleave
-            // and duplicate in the transcript).
-            timelineOffset = existing.map(\.end).max() ?? 0
-            liveSegments = merger.displaySnapshot()
-        }
-        // Load existing notes.
-        if let existingNotes = try? await env.meetingStore.loadNotes(for: handle.meeting.id) {
-            notes = existingNotes
-        }
-        // Clear the endedAt so the meeting appears as in-progress again.
-        var updated = handle.meeting
-        updated.endedAt = nil
-        try? FolderTreeScanner.writeMeeting(updated, to: MeetingFolder(url: handle.folderURL).metadataURL)
-
-        await start(handle: handle)
-    }
-
-    func start(handle: MeetingHandle) async {
-        self.meetingHandle = handle
-        // Look up the linked calendar event for auto-end detection.
-        if let eventID = handle.meeting.calendarEventID {
-            let events = await env.calendarService.upcomingEvents(within: 24 * 60 * 60)
-            self.linkedCalendarEvent = events.first(where: { $0.id == eventID })
-        }
-        let audioURL = handle.folderURL.appendingPathComponent(MeetingFolder.audioFilename)
-
-        // 1. Make sure the transcription model is loaded before audio capture
-        //    starts. loadModel is idempotent — instant on second+ runs, but on
-        //    the very first run this is the model download (medium ≈ 1.5 GB).
-        //    The privacy badge flips to yellow during the download.
-        state = .preparing
-        let modelId = env.selectedModelId
-        do {
-            try await env.activeTranscriptionEngine.loadModel(id: modelId) { _ in }
-        } catch {
-            state = .error("Could not load model \(modelId): \(error.localizedDescription)")
-            return
-        }
-
-        // 2. Start audio capture.
-        let micID = env.selectedMicDeviceID
-        currentMicUID = env.selectedMicDeviceUID
-        print("[RecordingController] selectedMicDeviceUID=\(env.selectedMicDeviceUID ?? "nil"), resolved deviceID=\(String(describing: micID))")
-        do {
-            try await coordinator.start(writingAudioTo: audioURL, micDeviceID: micID)
-        } catch {
-            state = .error(error.localizedDescription)
-            return
-        }
-        state = .recording
-
-        // Notify the meeting end detector that recording has started.
-        env.meetingEndDetector.recordingDidStart(event: linkedCalendarEvent)
-
-        // Live transcription pumps — one per channel.
-        let micStream = env.activeTranscriptionEngine.transcribeStream(
-            input: coordinator.micPCM,
-            channel: .mic,
-            speakerId: Speaker.you.id,
-            options: .default
-        )
-        let sysStream = env.activeTranscriptionEngine.transcribeStream(
-            input: coordinator.systemPCM,
-            channel: .system,
-            speakerId: Speaker.others.id,
-            options: .default
-        )
-        // NOTE: These tasks capture `self` strongly so the RecordingController
-        // stays alive while recording. The retain cycle is broken in stop() which
-        // cancels all tasks and clears the arrays.
-        streamTasks.append(Task {
-            do {
-                for try await seg in micStream { self.ingest(seg) }
-            } catch { print("mic stream error: \(error)") }
-        })
-        streamTasks.append(Task {
-            do {
-                for try await seg in sysStream { self.ingest(seg) }
-            } catch { print("sys stream error: \(error)") }
-        })
-
-        // Levels — also forward to the meeting end detector for silence detection.
-        let levelStream = coordinator.levels
-        let detector = env.meetingEndDetector
-        streamTasks.append(Task {
-            for await snap in levelStream {
-                self.micLevel = snap.mic
-                self.systemLevel = snap.system
-                detector.updateLevels(mic: snap.mic, system: snap.system)
-            }
-        })
-
-        clockTask = Task {
-            let started = Date()
-            while !Task.isCancelled {
-                try? await Task.sleep(for: .milliseconds(250))
-                self.elapsed = Date().timeIntervalSince(started)
-            }
-        }
-
-        // Crash failsafe: checkpoint the transcript to disk on a timer. The
-        // meeting keeps `endedAt == nil` while live, so if we crash the launch
-        // recovery finds this checkpoint (and the crash-safe audio) intact.
-        let meetingID = handle.meeting.id
-        checkpointTask = Task { [weak self] in
-            while !Task.isCancelled {
-                try? await Task.sleep(for: Self.checkpointInterval)
-                guard let self, self.state == .recording else { continue }
-                await self.checkpointTranscript(meetingID: meetingID)
-            }
-        }
-    }
-
-    /// Persist the current merged transcript to disk mid-recording. Segments are
-    /// promoted to final so a recovered transcript reads cleanly.
-    private func checkpointTranscript(meetingID: UUID) async {
-        let snapshot = merger.finalSnapshot()
-        guard !snapshot.isEmpty else { return }
-        try? await env.meetingStore.replaceTranscript(snapshot, for: meetingID)
-    }
-
-    /// Switch the microphone mid-recording when the user changes it in Settings.
-    func switchMicIfNeeded() {
-        let newUID = env.selectedMicDeviceUID
-        guard newUID != currentMicUID, state == .recording else { return }
-        currentMicUID = newUID
-        let newDeviceID = env.selectedMicDeviceID
-        print("[RecordingController] Switching mic mid-recording: UID=\(newUID ?? "default"), deviceID=\(String(describing: newDeviceID))")
-        Task {
-            try? await coordinator.switchMicDevice(to: newDeviceID)
-        }
-    }
-
-    private func ingest(_ seg: TranscriptSegment) {
-        var seg = seg
-        if timelineOffset > 0 {
-            seg.start += timelineOffset
-            seg.end += timelineOffset
-        }
-        merger.ingest(seg)
-        liveSegments = merger.displaySnapshot()
-    }
-
-    func stop() async -> CaptureResult? {
-        guard state == .recording || state == .paused else { return nil }
-        let result = try? await coordinator.stop()
-
-        for t in streamTasks { t.cancel() }
-        streamTasks.removeAll()
-        clockTask?.cancel(); clockTask = nil
-        checkpointTask?.cancel(); checkpointTask = nil
-
-        if let handle = meetingHandle {
-            // Persist the cleaned, finalized transcript (echo-deduped,
-            // duplicate-collapsed, all partials promoted to final).
-            let allSegments = merger.finalSnapshot()
-            try? await env.meetingStore.replaceTranscript(allSegments, for: handle.meeting.id)
-
-            // Persist user notes if any were taken.
-            if !notes.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-                try? await env.meetingStore.writeNotes(notes, for: handle.meeting.id)
-            }
-
-            var updated = handle.meeting
-            updated.endedAt = Date()
-            updated.hasAudio = result?.audioFileURL != nil
-            try? FolderTreeScanner.writeMeeting(updated, to: MeetingFolder(url: handle.folderURL).metadataURL)
-        }
-        state = .idle
-
-        // Post-process: echo reduction in the background.
-        if let handle = meetingHandle {
-            let folder = MeetingFolder(url: handle.folderURL)
-            let inputURL = folder.audioURL
-            let outputURL = folder.cleanedAudioURL
-            echoReductionTask = Task.detached(priority: .utility) {
-                let fm = FileManager.default
-                guard fm.fileExists(atPath: inputURL.path) else {
-                    print("[RecordingController] Echo reduction skipped — audio file not found at \(inputURL.path)")
-                    return false
-                }
-                let attrs = try? fm.attributesOfItem(atPath: inputURL.path)
-                let size = (attrs?[.size] as? Int) ?? 0
-                print("[RecordingController] Starting echo reduction: input=\(inputURL.lastPathComponent) (\(size) bytes)")
-                let ok = await AudioEchoReducer.reduceEcho(inputURL: inputURL, outputURL: outputURL)
-                if ok {
-                    let outAttrs = try? fm.attributesOfItem(atPath: outputURL.path)
-                    let outSize = (outAttrs?[.size] as? Int) ?? 0
-                    print("[RecordingController] Echo reduction succeeded: output=\(outputURL.lastPathComponent) (\(outSize) bytes)")
-                } else {
-                    print("[RecordingController] Echo reduction failed for \(inputURL.lastPathComponent)")
-                }
-                return ok
-            }
-        }
-
-        // NOTE: The caller (RecordingSessionService) is responsible for
-        // clearing the controller, resetting detection state and showing the
-        // post-recording sheet. This lets it read meetingHandle before it's lost.
-        return result
-    }
-}
-
+/// The recording strip at the top of the main window: status, timer, levels,
+/// notes and Stop — plus anything wrong (system audio not captured, no live
+/// transcript) and what the transcription model is doing.
 struct RecordingBarView: View {
     @Bindable var controller: RecordingController
     @Environment(AppEnvironment.self) private var env
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     var onNavigateToMeeting: (() -> Void)?
     @State private var showNotes = false
+    @State private var pulse = false
 
     var body: some View {
         VStack(spacing: 0) {
-            HStack(spacing: 12) {
-                Circle()
-                    .fill(controller.state == .recording ? Color.red : Color.gray)
-                    .frame(width: 12, height: 12)
+            mainRow
+                .padding(.horizontal, 16)
+                .padding(.vertical, 10)
 
-                if case .preparing = controller.state {
-                    ProgressView().controlSize(.small)
-                    Text("Loading model…").font(.caption).foregroundStyle(.secondary)
-                } else if case .error(let msg) = controller.state {
-                    Image(systemName: "exclamationmark.triangle.fill").foregroundStyle(.orange)
-                    Text(msg).font(.caption).foregroundStyle(.orange).lineLimit(1)
-                } else {
-                    // Meeting title — clickable to navigate to the live transcript.
-                    if let title = controller.meetingHandle?.meeting.title {
-                        Button {
-                            onNavigateToMeeting?()
-                        } label: {
-                            Text(title)
-                                .font(.callout.bold())
-                                .lineLimit(1)
-                        }
-                        .buttonStyle(.plain)
-                        .help("Show live transcript")
-                    }
-
-                    Text(controller.elapsed.formattedTimestamp)
-                        .font(.title3.monospacedDigit())
-                    LevelMeterView(level: controller.micLevel, label: "You")
-                    LevelMeterView(level: controller.systemLevel, label: "Others")
-                }
-
-                Spacer()
-
-                if controller.state == .recording {
-                    Button {
-                        withAnimation(.easeInOut(duration: 0.2)) { showNotes.toggle() }
-                    } label: {
-                        Image(systemName: showNotes ? "note.text.badge.plus" : "note.text")
-                    }
-                    .help("Meeting notes")
-
-                    Button("Stop") {
-                        Task { await env.recordingService.stop() }
-                    }
-                    .buttonStyle(.borderedProminent)
-                    .tint(.red)
-                }
+            ForEach(controller.issues) { issue in
+                RecordingIssueRow(issue: issue)
             }
-            .padding(.horizontal, 16)
-            .padding(.vertical, 10)
+
+            if case .loadingModel(let progress) = controller.transcriptionStatus, controller.state == .recording {
+                modelLoadingRow(progress: progress)
+            }
 
             if showNotes && controller.state == .recording {
                 Divider()
-                TextEditor(text: Bindable(controller).notes)
-                    .font(.body)
-                    .frame(height: 80)
-                    .scrollContentBackground(.hidden)
-                    .padding(.horizontal, 16)
-                    .padding(.vertical, 6)
+                notesEditor
             }
         }
         .background(.ultraThinMaterial)
-        .onChange(of: env.selectedMicDeviceUID) {
-            controller.switchMicIfNeeded()
+    }
+
+    // MARK: - Rows
+
+    private var mainRow: some View {
+        HStack(spacing: 12) {
+            statusDot
+
+            switch controller.state {
+            case .preparing:
+                ProgressView().controlSize(.small)
+                Text("Starting…").font(.caption).foregroundStyle(.secondary)
+            case .error(let message):
+                Image(systemName: "exclamationmark.triangle.fill").foregroundStyle(.orange)
+                Text(message).font(.caption).foregroundStyle(.orange).lineLimit(2)
+            default:
+                if let title = controller.meetingHandle?.meeting.title {
+                    Button {
+                        onNavigateToMeeting?()
+                    } label: {
+                        Text(title)
+                            .font(.callout.bold())
+                            .lineLimit(1)
+                    }
+                    .buttonStyle(.plain)
+                    .help("Show live transcript")
+                }
+
+                Text(controller.elapsed.formattedTimestamp)
+                    .font(.title3.monospacedDigit())
+
+                LevelMeterView(level: controller.micLevel, label: "You", detail: controller.micDeviceName)
+                if controller.systemAudioIssue == nil {
+                    LevelMeterView(level: controller.systemLevel, label: "Others", detail: "System audio")
+                } else {
+                    Label("Others: not captured", systemImage: "speaker.slash.fill")
+                        .font(.caption2)
+                        .foregroundStyle(.orange)
+                }
+            }
+
+            Spacer()
+
+            if controller.state == .recording {
+                Button {
+                    withAnimation(.easeInOut(duration: 0.2)) { showNotes.toggle() }
+                } label: {
+                    Label("Notes", systemImage: "note.text")
+                        .symbolVariant(showNotes ? .fill : .none)
+                }
+                .help(showNotes ? "Hide meeting notes" : "Take notes during the meeting")
+
+                Button {
+                    Task { await env.recordingService.stop() }
+                } label: {
+                    if controller.isFinishing {
+                        HStack(spacing: 6) {
+                            ProgressView().controlSize(.small)
+                            Text("Saving…")
+                        }
+                    } else {
+                        Text("Stop")
+                    }
+                }
+                .buttonStyle(.borderedProminent)
+                .tint(.red)
+                .disabled(controller.isFinishing)
+            }
         }
+    }
+
+    /// Recording indicator that doesn't rely on colour alone (it pulses, and the
+    /// state is also announced), and honours Reduce Motion.
+    private var statusDot: some View {
+        Circle()
+            .fill(controller.state == .recording ? Color.red : Color.gray)
+            .frame(width: 12, height: 12)
+            .opacity(controller.state == .recording && pulse && !reduceMotion ? 0.35 : 1)
+            .animation(reduceMotion ? nil : .easeInOut(duration: 0.9).repeatForever(autoreverses: true), value: pulse)
+            .onAppear { pulse = true }
+            .accessibilityLabel(controller.state == .recording ? "Recording" : "Not recording")
+    }
+
+    private func modelLoadingRow(progress: Double?) -> some View {
+        HStack(spacing: 8) {
+            if let progress {
+                ProgressView(value: progress).frame(width: 90)
+                Text("Downloading the transcription model… \(Int(progress * 100))%")
+            } else {
+                ProgressView().controlSize(.small)
+                Text("Preparing live transcription…")
+            }
+            Text("Audio is already being recorded.")
+                .foregroundStyle(.secondary)
+            Spacer()
+        }
+        .font(.caption)
+        .padding(.horizontal, 16)
+        .padding(.vertical, 6)
+        .background(Color.accentColor.opacity(0.08))
+    }
+
+    private var notesEditor: some View {
+        ZStack(alignment: .topLeading) {
+            TextEditor(text: $controller.notes)
+                .font(.body)
+                .scrollContentBackground(.hidden)
+            if controller.notes.isEmpty {
+                Text("Jot notes here. They're saved with the meeting and used when the summary is written.")
+                    .foregroundStyle(.tertiary)
+                    .padding(.leading, 5)
+                    .padding(.top, 8)
+                    .allowsHitTesting(false)
+            }
+        }
+        .frame(height: 80)
+        .padding(.horizontal, 16)
+        .padding(.vertical, 6)
+    }
+}
+
+/// One thing wrong with the recording, with a fix button where there is one.
+struct RecordingIssueRow: View {
+    let issue: RecordingIssue
+
+    var body: some View {
+        HStack(spacing: 8) {
+            Image(systemName: "exclamationmark.triangle.fill")
+                .foregroundStyle(.orange)
+                .accessibilityHidden(true)
+            Text(issue.message)
+                .font(.caption)
+            Spacer()
+            if let fix = issue.fix, let url = fix.settingsURL {
+                Button("Open \(fix.title) settings…") { NSWorkspace.shared.open(url) }
+                    .controlSize(.small)
+            }
+        }
+        .padding(.horizontal, 16)
+        .padding(.vertical, 6)
+        .background(Color.orange.opacity(0.14))
+        .help(issue.detail ?? issue.message)
+        .accessibilityElement(children: .combine)
     }
 }
 
 struct LevelMeterView: View {
     let level: Float       // dBFS, -120…0
     let label: String
+    /// What is being measured (device name), for tooltip and VoiceOver.
+    var detail: String? = nil
 
     var body: some View {
         VStack(alignment: .leading, spacing: 2) {
             Text(label).font(.caption2).foregroundStyle(.secondary)
             GeometryReader { proxy in
-                let pct = max(0, min(1, (Double(level) + 60) / 60))
+                let pct = Self.fraction(level)
                 ZStack(alignment: .leading) {
                     RoundedRectangle(cornerRadius: 2).fill(Color.gray.opacity(0.2))
                     RoundedRectangle(cornerRadius: 2)
@@ -360,6 +199,24 @@ struct LevelMeterView: View {
                 }
             }
             .frame(width: 80, height: 6)
+        }
+        .help(detail.map { "\(label): \($0)" } ?? label)
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel("\(label) level\(detail.map { ", \($0)" } ?? "")")
+        .accessibilityValue(Self.description(level))
+    }
+
+    /// −60 dBFS (silence) … 0 dBFS (full scale) → 0…1.
+    static func fraction(_ level: Float) -> Double {
+        max(0, min(1, (Double(level) + 60) / 60))
+    }
+
+    private static func description(_ level: Float) -> String {
+        switch fraction(level) {
+        case ..<0.05: "silent"
+        case ..<0.4: "quiet"
+        case ..<0.85: "good"
+        default: "very loud"
         }
     }
 

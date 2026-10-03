@@ -8,7 +8,15 @@ struct TranscriptView: View {
     @Binding var isSearching: Bool
     var isEditable: Bool = false
     var onSave: (([TranscriptSegment]) -> Void)? = nil
+    /// Rename a speaker for this meeting (e.g. "Others" → "Priya").
+    var onRenameSpeaker: ((_ speakerID: String, _ newName: String) -> Void)? = nil
     @State private var copied = false
+    @State private var pendingDeleteID: UUID?
+    @State private var renameSpeakerID: String?
+    @State private var renameText = ""
+    @State private var isNearBottom = true
+    @State private var matchOrder: [UUID] = []
+    @State private var matchCursor = 0
     @State private var searchText = ""
     @State private var isEditing = false
     @State private var editingSegmentID: UUID? = nil
@@ -20,28 +28,30 @@ struct TranscriptView: View {
     @FocusState private var searchFocused: Bool
     @FocusState private var editFocused: Bool
 
+    /// (A crash here when two participants shared an id is why this tolerates duplicates.)
     private var nameByID: [String: String] {
-        Dictionary(uniqueKeysWithValues: participants.map { ($0.id, $0.displayName) })
+        Dictionary(participants.map { ($0.id, $0.displayName) }, uniquingKeysWith: { first, _ in first })
     }
 
-    /// Segment IDs that contain the current search query.
-    private var matchingIDs: Set<UUID> {
-        guard !searchText.trimmingCharacters(in: .whitespaces).isEmpty else { return [] }
-        let query = searchText.lowercased()
-        var ids = Set<UUID>()
-        for seg in segments {
-            if seg.text.lowercased().contains(query) {
-                ids.insert(seg.id)
-            }
-            let name = nameByID[seg.speakerId] ?? seg.speakerId
-            if name.lowercased().contains(query) {
-                ids.insert(seg.id)
-            }
+    /// Segment IDs matching the current search (kept in sync by `recomputeMatches`,
+    /// rather than recomputed once per visible row on every render).
+    private var matchingIDs: Set<UUID> { Set(matchOrder) }
+    private var matchCount: Int { matchOrder.count }
+
+    private func recomputeMatches() {
+        let query = searchText.trimmingCharacters(in: .whitespaces).lowercased()
+        guard isSearching, !query.isEmpty else {
+            matchOrder = []
+            matchCursor = 0
+            return
         }
-        return ids
+        let names = nameByID
+        matchOrder = segments.filter {
+            $0.text.lowercased().contains(query)
+                || (names[$0.speakerId] ?? $0.speakerId).lowercased().contains(query)
+        }.map(\.id)
+        matchCursor = min(matchCursor, max(0, matchOrder.count - 1))
     }
-
-    private var matchCount: Int { matchingIDs.count }
 
     var body: some View {
         VStack(spacing: 0) {
@@ -57,10 +67,24 @@ struct TranscriptView: View {
                                 .textFieldStyle(.plain)
                                 .font(.callout)
                                 .focused($searchFocused)
+                                .onSubmit { stepMatch(1) }
+                                .onExitCommand { isSearching = false; searchText = "" }
                             if !searchText.isEmpty {
-                                Text("\(matchCount) match\(matchCount == 1 ? "" : "es")")
+                                Text(matchCount == 0 ? "No matches" : "\(matchCursor + 1) of \(matchCount)")
                                     .font(.caption2)
                                     .foregroundStyle(.secondary)
+                                Button { stepMatch(-1) } label: { Image(systemName: "chevron.up") }
+                                    .buttonStyle(.borderless)
+                                    .disabled(matchCount < 2)
+                                    .keyboardShortcut("g", modifiers: [.command, .shift])
+                                    .help("Previous match (⇧⌘G)")
+                                    .accessibilityLabel("Previous match")
+                                Button { stepMatch(1) } label: { Image(systemName: "chevron.down") }
+                                    .buttonStyle(.borderless)
+                                    .disabled(matchCount < 2)
+                                    .keyboardShortcut("g", modifiers: .command)
+                                    .help("Next match (⌘G)")
+                                    .accessibilityLabel("Next match")
                                 Button {
                                     searchText = ""
                                 } label: {
@@ -69,6 +93,7 @@ struct TranscriptView: View {
                                         .foregroundStyle(.secondary)
                                 }
                                 .buttonStyle(.borderless)
+                                .accessibilityLabel("Clear search")
                             }
                             Button {
                                 isSearching = false
@@ -157,7 +182,9 @@ struct TranscriptView: View {
                 ScrollView {
                     LazyVStack(alignment: .leading, spacing: 20) {
                         if segments.isEmpty {
-                            Text("No transcript yet — start a recording to see live captions here.")
+                            Text(isEditable
+                                 ? "There's no transcript for this meeting. Record into it with Resume, or paste one in with Import transcript."
+                                 : "Listening… captions appear here as people speak.")
                                 .foregroundStyle(.secondary)
                                 .padding()
                         }
@@ -178,13 +205,26 @@ struct TranscriptView: View {
                     .padding(.vertical, 12)
                     .textSelection(.enabled)
                 }
+                // Track whether the reader is at the bottom: new live captions follow
+                // them there, but never yank them away from something they scrolled
+                // up to read.
+                .onScrollGeometryChange(for: Bool.self) { geo in
+                    geo.contentOffset.y + geo.containerSize.height >= geo.contentSize.height - 80
+                } action: { _, nearBottom in
+                    isNearBottom = nearBottom
+                }
                 .onChange(of: segments.last?.id) { _, newID in
-                    if let newID, !isSearching { withAnimation { proxy.scrollTo(newID, anchor: .bottom) } }
+                    if let newID, !isSearching, isNearBottom { withAnimation { proxy.scrollTo(newID, anchor: .bottom) } }
                 }
                 .onChange(of: searchText) {
-                    // Scroll to the first match when typing.
-                    if let firstMatch = segments.first(where: { matchingIDs.contains($0.id) }) {
-                        withAnimation { proxy.scrollTo(firstMatch.id, anchor: .center) }
+                    recomputeMatches()
+                    matchCursor = 0
+                    if let first = matchOrder.first { withAnimation { proxy.scrollTo(first, anchor: .center) } }
+                }
+                .onChange(of: segments) { if isSearching { recomputeMatches() } }
+                .onChange(of: matchCursor) {
+                    if matchOrder.indices.contains(matchCursor) {
+                        withAnimation { proxy.scrollTo(matchOrder[matchCursor], anchor: .center) }
                     }
                 }
             }
@@ -214,6 +254,32 @@ struct TranscriptView: View {
             } else {
                 Text("Remove all segments after this point?")
             }
+        }
+        .alert("Delete this segment?", isPresented: Binding(
+            get: { pendingDeleteID != nil },
+            set: { if !$0 { pendingDeleteID = nil } }
+        )) {
+            Button("Cancel", role: .cancel) { pendingDeleteID = nil }
+            Button("Delete", role: .destructive) {
+                if let id = pendingDeleteID { deleteSegment(id) }
+                pendingDeleteID = nil
+            }
+        } message: {
+            Text("It's removed from this meeting's transcript. This can't be undone.")
+        }
+        .alert("Rename speaker", isPresented: Binding(
+            get: { renameSpeakerID != nil },
+            set: { if !$0 { renameSpeakerID = nil } }
+        )) {
+            TextField("Name", text: $renameText)
+            Button("Cancel", role: .cancel) { renameSpeakerID = nil }
+            Button("Rename") {
+                let name = renameText.trimmingCharacters(in: .whitespacesAndNewlines)
+                if let id = renameSpeakerID, !name.isEmpty { onRenameSpeaker?(id, name) }
+                renameSpeakerID = nil
+            }
+        } message: {
+            Text("Used throughout this meeting's transcript, copies and summaries.")
         }
         .alert("Delete Selected Segments", isPresented: $showDeleteSelectedConfirm) {
             Button("Cancel", role: .cancel) {}
@@ -269,8 +335,22 @@ struct TranscriptView: View {
                 .foregroundStyle(Self.speakerColor(group.channel))
             Text(group.start.formattedTimestamp)
                 .font(.caption2.monospacedDigit())
-                .foregroundStyle(.tertiary)
+                .foregroundStyle(.secondary)
         }
+        .contextMenu {
+            if onRenameSpeaker != nil {
+                Button("Rename “\(nameByID[group.speakerId] ?? group.speakerId.capitalized)”…") {
+                    renameText = nameByID[group.speakerId] ?? ""
+                    renameSpeakerID = group.speakerId
+                }
+            }
+        }
+        .accessibilityElement(children: .combine)
+    }
+
+    private func stepMatch(_ delta: Int) {
+        guard !matchOrder.isEmpty else { return }
+        matchCursor = (matchCursor + delta + matchOrder.count) % matchOrder.count
     }
 
     @ViewBuilder
@@ -290,6 +370,7 @@ struct TranscriptView: View {
                 }
                 .buttonStyle(.borderless)
                 .help("Select this segment")
+                .accessibilityLabel(selectedSegmentIDs.contains(seg.id) ? "Deselect segment" : "Select segment")
             }
 
             if isEditing && editingSegmentID == seg.id {
@@ -354,8 +435,7 @@ struct TranscriptView: View {
                 Label("Edit Segment", systemImage: "pencil")
             }
             Button(role: .destructive) {
-                if !isEditing { isEditing = true }
-                deleteSegment(seg.id)
+                pendingDeleteID = seg.id          // confirm first; no hidden switch into edit mode
             } label: {
                 Label("Delete Segment", systemImage: "trash")
             }

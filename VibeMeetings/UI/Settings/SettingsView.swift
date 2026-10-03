@@ -1,6 +1,7 @@
 import ServiceManagement
 import SwiftUI
 import UserNotifications
+import VMCalendar
 import VMCore
 import VMRecording
 import VMSummarization
@@ -11,6 +12,7 @@ struct SettingsView: View {
     var body: some View {
         TabView {
             GeneralSettingsView().tabItem { Label("General", systemImage: "gear") }
+            RecordingSettingsView().tabItem { Label("Recording", systemImage: "waveform") }
             EngineSettingsView().tabItem { Label("Engines", systemImage: "cpu") }
             CalendarSettingsView().tabItem { Label("Calendar", systemImage: "calendar") }
             NotificationSettingsView().tabItem { Label("Notifications", systemImage: "bell") }
@@ -24,17 +26,9 @@ struct SettingsView: View {
 
 private struct GeneralSettingsView: View {
     @Environment(AppEnvironment.self) private var env
-    @State private var inputDevices: [AudioInputDevice] = AudioDeviceEnumerator.inputDevices()
     @State private var launchAtLogin: Bool = SMAppService.mainApp.status == .enabled
     @State private var newOrgName: String = ""
-
-    /// Binding that maps `nil` (system default) ↔ empty string for the Picker.
-    private var micSelection: Binding<String> {
-        Binding(
-            get: { env.selectedMicDeviceUID ?? "" },
-            set: { env.setMicDevice(uid: $0.isEmpty ? nil : $0) }
-        )
-    }
+    @State private var launchError: String?
 
     var body: some View {
         Form {
@@ -47,9 +41,9 @@ private struct GeneralSettingsView: View {
                             try SMAppService.mainApp.unregister()
                         }
                     } catch {
-                        print("[Settings] Launch at login error: \(error)")
-                        // Revert toggle on failure.
+                        // Revert the toggle and say why (it used to flip back silently).
                         launchAtLogin = SMAppService.mainApp.status == .enabled
+                        launchError = error.localizedDescription
                     }
                 }
 
@@ -68,57 +62,12 @@ private struct GeneralSettingsView: View {
                 }
             }
 
-            Picker("Microphone", selection: micSelection) {
-                Text("System Default").tag("")
-                ForEach(inputDevices) { device in
-                    Text(device.name + (device.isDefault ? " (Default)" : ""))
-                        .tag(device.uid)
+            Section("Setup") {
+                Button("Run setup again…") {
+                    env.hasCompletedOnboarding = false
+                    env.presenter.show()
                 }
-            }
-
-            if let uid = env.selectedMicDeviceUID,
-               !inputDevices.contains(where: { $0.uid == uid }) {
-                Label("Selected microphone is not currently connected.", systemImage: "exclamationmark.triangle")
-                    .font(.caption)
-                    .foregroundStyle(.orange)
-            }
-
-            Section("Auto-End Detection") {
-                Toggle("Enable auto-end detection", isOn: Binding(
-                    get: { env.meetingEndDetector.autoEndEnabled },
-                    set: { env.meetingEndDetector.autoEndEnabled = $0 }
-                ))
-
-                if env.meetingEndDetector.autoEndEnabled {
-                    LabeledContent("Silence threshold") {
-                        Picker("", selection: Binding(
-                            get: { env.meetingEndDetector.silenceThresholdSeconds },
-                            set: { env.meetingEndDetector.silenceThresholdSeconds = $0 }
-                        )) {
-                            Text("1 minute").tag(TimeInterval(60))
-                            Text("2 minutes").tag(TimeInterval(120))
-                            Text("3 minutes").tag(TimeInterval(180))
-                            Text("5 minutes").tag(TimeInterval(300))
-                        }
-                        .frame(width: 150)
-                    }
-
-                    Toggle("Monitor meeting apps (Teams, Zoom)", isOn: Binding(
-                        get: { env.meetingEndDetector.appMonitoringEnabled },
-                        set: { env.meetingEndDetector.appMonitoringEnabled = $0 }
-                    ))
-
-                    Text("Suggests stopping the recording when the scheduled end time passes, audio goes silent, or the meeting app exits.")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                }
-
-                Toggle("Notify if microphone picks up no audio", isOn: Binding(
-                    get: { env.meetingEndDetector.micSilenceNotificationEnabled },
-                    set: { env.meetingEndDetector.micSilenceNotificationEnabled = $0 }
-                ))
-
-                Text("Sends a system notification if your mic appears dead (muted, wrong device, permission issue) even while the rest of the call is still audible.")
+                Text("Walks through permissions, the transcription model and calendar access again.")
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }
@@ -137,6 +86,8 @@ private struct GeneralSettingsView: View {
                                 .foregroundStyle(.red)
                         }
                         .buttonStyle(.borderless)
+                        .help("Remove \(org)")
+                        .accessibilityLabel("Remove organization \(org)")
                     }
                 }
 
@@ -157,10 +108,12 @@ private struct GeneralSettingsView: View {
                             .foregroundStyle(.green)
                     }
                     .buttonStyle(.borderless)
+                    .help("Add organization")
+                    .accessibilityLabel("Add organization")
                     .disabled(newOrgName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
                 }
 
-                Text("Organizations available in the meeting metadata picker. The first org is used as the default for new meetings.")
+                Text("Organizations offered when you edit a meeting's details. A meeting only gets one if you choose it.")
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }
@@ -184,6 +137,129 @@ private struct GeneralSettingsView: View {
             }
         }
         .formStyle(.grouped)
+        .alert("Couldn't change launch at login", isPresented: Binding(
+            get: { launchError != nil }, set: { if !$0 { launchError = nil } }
+        )) {
+            Button("OK", role: .cancel) {}
+        } message: {
+            Text(launchError ?? "")
+        }
+    }
+}
+
+/// Everything about capturing audio: which microphone, echo, and how a
+/// recording ends. (These were spread across General and Notifications.)
+private struct RecordingSettingsView: View {
+    @Environment(AppEnvironment.self) private var env
+    @AppStorage(AppEnvironment.menuBarEnabledKey) private var showMenuBar = true
+    @State private var inputDevices: [AudioInputDevice] = AudioDeviceEnumerator.inputDevices()
+
+    /// Binding that maps `nil` (system default) ↔ empty string for the Picker.
+    private var micSelection: Binding<String> {
+        Binding(
+            get: { env.selectedMicDeviceUID ?? "" },
+            set: { env.setMicDevice(uid: $0.isEmpty ? nil : $0) }
+        )
+    }
+
+    var body: some View {
+        @Bindable var env = env
+        Form {
+            Section("Microphone") {
+                Picker("Input", selection: micSelection) {
+                    Text("System Default").tag("")
+                    ForEach(inputDevices) { device in
+                        Text(device.name + (device.isDefault ? " (Default)" : ""))
+                            .tag(device.uid)
+                    }
+                }
+
+                if let uid = env.selectedMicDeviceUID,
+                   !inputDevices.contains(where: { $0.uid == uid }) {
+                    Label("Selected microphone is not currently connected.", systemImage: "exclamationmark.triangle")
+                        .font(.caption)
+                        .foregroundStyle(.orange)
+                }
+
+                Text("Changing this during a recording switches straight away.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+
+            Section("Speaker echo") {
+                Toggle("Remove speaker echo from my transcript", isOn: Bindable(env).echoCancellationEnabled)
+                Text("Using speakers instead of headphones? Your microphone hears the other people through the room, which garbles your side of the transcript. This cancels that echo using the call audio as a reference. Headphones are detected automatically and left untouched; they remain the surest fix. Your saved recording is never altered.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+
+            Section("Ending a recording") {
+                Toggle("Suggest stopping when a meeting seems to have ended", isOn: Binding(
+                    get: { env.meetingEndDetector.autoEndEnabled },
+                    set: { env.meetingEndDetector.autoEndEnabled = $0 }
+                ))
+
+                if env.meetingEndDetector.autoEndEnabled {
+                    LabeledContent("Silence threshold") {
+                        Picker("", selection: Binding(
+                            get: { env.meetingEndDetector.silenceThresholdSeconds },
+                            set: { env.meetingEndDetector.silenceThresholdSeconds = $0 }
+                        )) {
+                            Text("1 minute").tag(TimeInterval(60))
+                            Text("2 minutes").tag(TimeInterval(120))
+                            Text("3 minutes").tag(TimeInterval(180))
+                            Text("5 minutes").tag(TimeInterval(300))
+                        }
+                        .frame(width: 150)
+                    }
+
+                    Toggle("Watch the meeting app (Teams, Zoom…) for the call ending", isOn: Binding(
+                        get: { env.meetingEndDetector.appMonitoringEnabled },
+                        set: { env.meetingEndDetector.appMonitoringEnabled = $0 }
+                    ))
+
+                    Text("Asks whether to stop when the scheduled end time has passed, everything has gone quiet, or the meeting app has quit. It never stops a recording by itself. Choosing “Keep recording” only quiets that one reason, for a while.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+
+                Toggle("Notify if microphone picks up no audio", isOn: Binding(
+                    get: { env.meetingEndDetector.micSilenceNotificationEnabled },
+                    set: { env.meetingEndDetector.micSilenceNotificationEnabled = $0 }
+                ))
+
+                Text("Sends a system notification if your mic appears dead (muted, wrong device, permission issue) even while the rest of the call is still audible.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+
+
+            Section {
+                Toggle("Show floating indicator", isOn: $env.showRecordingOverlay)
+                if env.showRecordingOverlay {
+                    Button("Reset Indicator Position") {
+                        RecordingOverlayController.resetPosition()
+                    }
+                }
+                Text("A small pill that floats above other apps: “Not recording · Record” during a call, and a timer with Stop while recording. Drag it anywhere.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+
+                Toggle("Show in menu bar", isOn: $showMenuBar)
+            } header: {
+                Text("Recording indicator")
+            }
+
+        }
+        .formStyle(.grouped)
+        // Plugging in a headset while this window is open should show up.
+        .task {
+            while !Task.isCancelled {
+                inputDevices = AudioDeviceEnumerator.inputDevices()
+                try? await Task.sleep(for: .seconds(2))
+            }
+        }
     }
 }
 
@@ -203,6 +279,9 @@ private struct EngineSettingsView: View {
     @State private var openAITesting: Bool = false
     @State private var ollamaModels: [SummarizationModelInfo] = []
     @State private var ollamaModelsLoading: Bool = false
+    @State private var downloadProgress: Double = 0
+    @State private var modelsError: String?
+    @State private var needsOpenAIKeyHint = false
 
     enum OllamaTestResult: Equatable {
         case untested
@@ -212,6 +291,41 @@ private struct EngineSettingsView: View {
 
     var body: some View {
         Form {
+            Section {
+                Picker("Write summaries with", selection: Binding(
+                    get: { env.activeSummarizationKind },
+                    set: { kind in
+                        if kind == "openai" {
+                            if openAIKey.isEmpty {
+                                // Previously this silently snapped back to Ollama.
+                                needsOpenAIKeyHint = true
+                            } else {
+                                needsOpenAIKeyHint = false
+                                env.setOpenAI(apiKey: openAIKey, modelId: openAIModel.isEmpty ? "gpt-4o-mini" : openAIModel)
+                            }
+                        } else {
+                            needsOpenAIKeyHint = false
+                            env.setOllamaAsSummarizer()
+                        }
+                    }
+                )) {
+                    Text("Ollama (on this Mac or your network)").tag("ollama")
+                    Text("OpenAI (cloud)").tag("openai")
+                }
+                if needsOpenAIKeyHint {
+                    Label("Add an OpenAI API key in the OpenAI section below, press Test & Save, then choose OpenAI again.", systemImage: "info.circle")
+                        .font(.caption)
+                        .foregroundStyle(.orange)
+                }
+                Text(env.activeSummarizationKind == "openai"
+                     ? "Transcripts are sent to OpenAI to write summaries and answer chat questions."
+                     : "Summaries and chat run on your Ollama server; nothing is sent to a cloud service.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            } header: {
+                Text("Summaries")
+            }
+
             Section("Transcription") {
                 Picker("Engine", selection: $engineKind) {
                     ForEach(env.transcriptionEngines, id: \.displayName) { engine in
@@ -226,7 +340,12 @@ private struct EngineSettingsView: View {
                     Task { await loadModels() }
                 }
 
-                if models.isEmpty {
+                if let modelsError {
+                    Label("Couldn't list the models: \(modelsError)", systemImage: "exclamationmark.triangle.fill")
+                        .font(.caption)
+                        .foregroundStyle(.orange)
+                    Button("Try again") { Task { await loadModels() } }
+                } else if models.isEmpty {
                     HStack { Spacer(); ProgressView().controlSize(.small); Spacer() }
                 } else {
                     ForEach(models) { m in modelRow(m) }
@@ -288,7 +407,7 @@ private struct EngineSettingsView: View {
                     .help("Enter model name (e.g. llama3.1:8b-instruct-q4_K_M)")
                 }
             } header: {
-                Text("Ollama (summaries)")
+                Text("Ollama" + (env.activeSummarizationKind == "ollama" ? " · in use" : ""))
             } footer: {
                 Text("Default is `http://127.0.0.1:11434`. Point this at a self-hosted Ollama on your LAN (e.g. `http://192.168.1.50:11434`) if you'd rather not run Ollama on this Mac. The configured host is the only non-loopback destination this app is allowed to reach.")
                     .font(.caption)
@@ -296,20 +415,6 @@ private struct EngineSettingsView: View {
             }
 
             Section {
-                Picker("Summary engine", selection: Binding(
-                    get: { env.activeSummarizationKind },
-                    set: { kind in
-                        if kind == "openai" && !openAIKey.isEmpty {
-                            env.setOpenAI(apiKey: openAIKey, modelId: openAIModel.isEmpty ? "gpt-4o-mini" : openAIModel)
-                        } else {
-                            env.setOllamaAsSummarizer()
-                        }
-                    }
-                )) {
-                    Text("Ollama (local)").tag("ollama")
-                    Text("OpenAI").tag("openai")
-                }
-
                 SecureField("API Key", text: $openAIKey, prompt: Text("sk-..."))
                     .textFieldStyle(.roundedBorder)
 
@@ -346,7 +451,7 @@ private struct EngineSettingsView: View {
                         .textFieldStyle(.roundedBorder)
                 }
             } header: {
-                Text("OpenAI (summaries)")
+                Text("OpenAI" + (env.activeSummarizationKind == "openai" ? " · in use" : ""))
             } footer: {
                 Text("Your API key is stored locally. Transcripts are sent to OpenAI's API for summarization when this engine is active.")
                     .font(.caption)
@@ -393,8 +498,11 @@ private struct EngineSettingsView: View {
             Spacer()
 
             if downloadingID == m.id {
-                ProgressView().controlSize(.small)
-                    .frame(width: 60)
+                ProgressView(value: downloadProgress)
+                    .frame(width: 90)
+                Text("\(Int(downloadProgress * 100))%")
+                    .font(.caption.monospacedDigit())
+                    .foregroundStyle(.secondary)
             } else if m.isDownloaded {
                 if env.selectedModelId == m.id {
                     Text("Active")
@@ -414,12 +522,17 @@ private struct EngineSettingsView: View {
     }
 
     private func selectModel(_ id: String) {
-        env.selectedModelId = id
-        UserDefaults.standard.set(id, forKey: "VibeMeetings.SelectedTranscriptionModelId")
+        env.selectTranscriptionModel(id)
     }
 
     private func loadModels() async {
-        models = (try? await env.activeTranscriptionEngine.availableModels()) ?? []
+        do {
+            models = try await env.activeTranscriptionEngine.availableModels()
+            modelsError = nil
+        } catch {
+            models = []
+            modelsError = error.localizedDescription
+        }
     }
 
     private func loadOllamaModels() async {
@@ -431,10 +544,13 @@ private struct EngineSettingsView: View {
 
     private func downloadModel(_ id: String) async {
         downloadingID = id
+        downloadProgress = 0
         downloadError = nil
         defer { downloadingID = nil }
         do {
-            try await env.activeTranscriptionEngine.loadModel(id: id) { _ in }
+            try await env.activeTranscriptionEngine.loadModel(id: id) { p in
+                Task { @MainActor in downloadProgress = p }
+            }
             await loadModels()
             // Auto-select if the user doesn't have a working model yet.
             let downloaded = models.filter(\.isDownloaded)
@@ -543,16 +659,16 @@ private struct EngineSettingsView: View {
 
 private struct NotificationSettingsView: View {
     @Environment(AppEnvironment.self) private var env
-    @AppStorage(AppEnvironment.menuBarEnabledKey) private var showMenuBar = true
     @State private var authorizationStatus: UNAuthorizationStatus = .notDetermined
     @State private var alertStyle: UNAlertStyle = .alert
+    private var calendarRemindersEnabled: Bool { CalendarPreferences.shared.bannerEnabled }
 
     var body: some View {
         @Bindable var env = env
         Form {
             Section {
                 if authorizationStatus == .denied {
-                    Label("Notifications are disabled in System Settings. Enable them to receive alerts from vibe-meetings.", systemImage: "exclamationmark.triangle.fill")
+                    Label("Notifications are disabled in System Settings. Enable them to receive alerts from Vibe Meetings.", systemImage: "exclamationmark.triangle.fill")
                         .font(.caption)
                         .foregroundStyle(.orange)
 
@@ -568,7 +684,7 @@ private struct NotificationSettingsView: View {
                     }
                     .buttonStyle(.borderedProminent)
 
-                    Text("Grant notification permission so vibe-meetings can alert you about meetings and completed summaries.")
+                    Text("Grant notification permission so Vibe Meetings can alert you about meetings and completed summaries.")
                         .font(.caption)
                         .foregroundStyle(.secondary)
                 } else {
@@ -577,7 +693,7 @@ private struct NotificationSettingsView: View {
                         .foregroundStyle(.green)
 
                     if alertStyle != .alert {
-                        Label("Reminders disappear after a few seconds. In System Settings → Notifications → vibe-meetings, set the alert style to **Persistent** (Alerts) so a \"not recording\" reminder stays on screen until you act on it.", systemImage: "exclamationmark.triangle.fill")
+                        Label("Reminders disappear after a few seconds. In System Settings → Notifications → Vibe Meetings, set the alert style to **Persistent** (Alerts) so a \"not recording\" reminder stays on screen until you act on it.", systemImage: "exclamationmark.triangle.fill")
                             .font(.caption)
                             .foregroundStyle(.orange)
                         Button("Open Notification Settings") {
@@ -585,7 +701,7 @@ private struct NotificationSettingsView: View {
                         }
                     }
                 }
-                Text("If you use a Focus mode during meetings, add vibe-meetings to its allowed apps so reminders get through.")
+                Text("If you use a Focus mode during meetings, add Vibe Meetings to its allowed apps so reminders get through.")
                     .font(.caption)
                     .foregroundStyle(.secondary)
             } header: {
@@ -611,6 +727,11 @@ private struct NotificationSettingsView: View {
             }
 
             Section {
+                if !calendarRemindersEnabled {
+                    Label("Calendar reminders are switched off in the Calendar tab (“Show meeting banner and calendar reminders”), so the options below have no effect.", systemImage: "info.circle")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
                 Toggle("Pre-meeting reminder", isOn: $env.notifyPreMeetingReminder)
 
                 if env.notifyPreMeetingReminder {
@@ -629,22 +750,6 @@ private struct NotificationSettingsView: View {
                     .foregroundStyle(.secondary)
             } header: {
                 Text("Calendar Reminders")
-            }
-
-            Section {
-                Toggle("Show floating indicator", isOn: $env.showRecordingOverlay)
-                if env.showRecordingOverlay {
-                    Button("Reset Indicator Position") {
-                        RecordingOverlayController.resetPosition()
-                    }
-                }
-                Text("A small pill that floats above other apps: “Not recording · Record” during a call, and a timer with Stop while recording. Drag it anywhere.")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-
-                Toggle("Show in menu bar", isOn: $showMenuBar)
-            } header: {
-                Text("Recording Indicator")
             }
 
             Section {

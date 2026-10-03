@@ -24,8 +24,15 @@ final class AppRouter {
     /// Show the post-recording metadata sheet for a just-finished recording.
     var pendingPostRecording: PostRecordingItem?
 
+    /// Show the "New folder" sheet (set by the File menu; consumed by the sidebar).
+    var pendingNewFolder = false
+
     /// Select this meeting in the sidebar.
     var selectMeetingID: UUID?
+
+    func requestNewFolder() {
+        pendingNewFolder = true
+    }
 
     func requestNewMeeting(preselectEventID: String? = nil) {
         pendingNewMeeting = NewMeetingRequest(preselectEventID: preselectEventID)

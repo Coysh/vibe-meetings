@@ -9,7 +9,8 @@ struct SuggestionBanner: View {
     var body: some View {
         HStack(spacing: 12) {
             Image(systemName: "video.fill")
-                .foregroundStyle(.purple)
+                .foregroundStyle(.tint)
+                .accessibilityHidden(true)
 
             VStack(alignment: .leading, spacing: 2) {
                 Text("**\(event.title)** \(event.meetingLink.map { "is starting on \($0.platform.displayName)" } ?? "— meeting app detected")")
@@ -23,12 +24,12 @@ struct SuggestionBanner: View {
 
             Button("Start recording", action: onStart)
                 .buttonStyle(.borderedProminent)
-            Button("Dismiss", action: onDismiss)
+            Button("Not now", action: onDismiss)
                 .buttonStyle(.bordered)
         }
         .padding(.horizontal, 14)
         .padding(.vertical, 10)
-        .background(.yellow.opacity(0.18))
+        .background(Color.accentColor.opacity(0.12))
         .overlay(alignment: .bottom) { Divider() }
     }
 }

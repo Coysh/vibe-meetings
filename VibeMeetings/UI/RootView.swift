@@ -31,19 +31,8 @@ struct RootView: View {
                     })
                     Divider()
                 }
-                Group {
-                    if let id = selection.firstMeetingID {
-                        MeetingDetailView(meetingID: id) { chatMeetingID in
-                            chatFocusedMeetingID = chatMeetingID
-                            showChatPanel = true
-                        }
-                        .id(id)
-                    } else {
-                        DashboardView { meetingID in
-                            selection = [.meeting(meetingID)]
-                        }
-                    }
-                }
+                detail
+                    .navigationTitle(detailTitle)
             }
             .safeAreaInset(edge: .top) {
                 VStack(spacing: 0) {
@@ -51,7 +40,7 @@ struct RootView: View {
                         SuggestionBanner(
                             event: ev,
                             onStart: {
-                                Task { try? await env.recordingService.start(.event(ev)) }
+                                Task { await env.recordingService.start(event: ev) }
                             },
                             onDismiss: { env.bannerCoordinator.dismiss(ev) }
                         )
@@ -96,19 +85,26 @@ struct RootView: View {
                 Button {
                     selection = []
                 } label: {
-                    Label("Home", systemImage: "house")
+                    Label("Dashboard", systemImage: "house")
                 }
-                .help("Back to dashboard")
+                .help("Back to the dashboard")
                 .disabled(selection.isEmpty)
             }
             ToolbarItem(placement: .primaryAction) {
                 Button {
-                    chatFocusedMeetingID = nil
-                    showChatPanel.toggle()
+                    // Open on all meetings; if it is already showing a single
+                    // meeting, switch to all meetings rather than closing it.
+                    if showChatPanel && chatFocusedMeetingID == nil {
+                        showChatPanel = false
+                    } else {
+                        chatFocusedMeetingID = nil
+                        showChatPanel = true
+                    }
                 } label: {
                     Label("Chat", systemImage: "bubble.left.and.text.bubble.right")
                 }
-                .help("Ask questions across all meetings")
+                .keyboardShortcut("i", modifiers: [.command, .option])
+                .help("Ask questions across all meetings (⌥⌘I)")
             }
             ToolbarItem(placement: .primaryAction) {
                 Button {
@@ -132,10 +128,79 @@ struct RootView: View {
                 NewMeetingSheet(parentFolder: parent, preselectedEventID: request.preselectEventID) { handle in
                     selection = [.meeting(handle.meeting.id)]
                 }
+            } else {
+                // The library hasn't loaded (or couldn't be opened): never an empty, un-closable sheet.
+                VStack(spacing: 16) {
+                    ContentUnavailableView(
+                        "Your meetings folder isn't ready",
+                        systemImage: "folder.badge.questionmark",
+                        description: Text("Vibe Meetings couldn't read its meetings folder. Check that it exists in Settings → General, then try again.")
+                    )
+                    Button("Close") { newMeetingRequest = nil }
+                        .keyboardShortcut(.cancelAction)
+                }
+                .padding()
+                .frame(width: 420, height: 280)
             }
         }
         .sheet(item: $postRecording) { item in
             PostRecordingSheet(meetingID: item.meetingID, meetingFolderURL: item.folderURL)
+        }
+        .sheet(isPresented: Binding(
+            get: { !env.hasCompletedOnboarding },
+            set: { if !$0 { env.hasCompletedOnboarding = true } }
+        )) {
+            OnboardingFlowView()
+        }
+        .alert(
+            env.presentedError?.title ?? "Something went wrong",
+            isPresented: Binding(
+                get: { env.presentedError != nil },
+                set: { if !$0 { env.presentedError = nil } }
+            ),
+            presenting: env.presentedError
+        ) { _ in
+            Button("OK", role: .cancel) {}
+        } message: { error in
+            Text(error.message)
+        }
+    }
+
+    // MARK: - Detail pane
+
+    @ViewBuilder
+    private var detail: some View {
+        if selection.count > 1 {
+            // Used to show an arbitrary one of the selected meetings.
+            ContentUnavailableView(
+                "\(selection.count) items selected",
+                systemImage: "checkmark.circle",
+                description: Text("Press Delete to move them to the Trash, or click one to open it.")
+            )
+        } else if let id = selection.single?.meetingID {
+            MeetingDetailView(meetingID: id) { chatMeetingID in
+                chatFocusedMeetingID = chatMeetingID
+                showChatPanel = true
+            }
+            .id(id)
+        } else if case .folder(let url)? = selection.single,
+                  let node = env.folderTree?.node(at: url) {
+            FolderOverviewView(folder: node) { meetingID in selection = [.meeting(meetingID)] }
+                .id(url)
+        } else {
+            DashboardView { meetingID in
+                selection = [.meeting(meetingID)]
+            }
+        }
+    }
+
+    private var detailTitle: String {
+        guard let single = selection.single else { return selection.isEmpty ? "Dashboard" : "Selection" }
+        switch single {
+        case .meeting(let id):
+            return env.folderTree?.meetingNode(id: id)?.meeting?.title ?? "Meeting"
+        case .folder(let url):
+            return env.folderTree?.node(at: url)?.name ?? "Folder"
         }
     }
 
@@ -165,40 +230,12 @@ struct RootView: View {
         guard let sel = selection.single else { return root }
         switch sel {
         case .folder(let url):
-            return findNode(at: url, in: root) ?? root
+            return root.node(at: url) ?? root
         case .meeting(let id):
-            if let m = findMeetingNode(id: id, in: root),
-               let parent = findParent(of: m, in: root) {
+            if let m = root.meetingNode(id: id), let parent = root.parent(of: m) {
                 return parent
             }
             return root
         }
     }
 }
-
-private func findNode(at url: URL, in node: FolderNode) -> FolderNode? {
-    if node.url.standardizedFileURL == url.standardizedFileURL { return node }
-    for child in node.children {
-        if let hit = findNode(at: url, in: child) { return hit }
-    }
-    return nil
-}
-
-private func findMeetingNode(id: UUID, in node: FolderNode) -> FolderNode? {
-    if node.isMeeting, node.meeting?.id == id { return node }
-    for child in node.children {
-        if let hit = findMeetingNode(id: id, in: child) { return hit }
-    }
-    return nil
-}
-
-private func findParent(of target: FolderNode, in node: FolderNode) -> FolderNode? {
-    if node.children.contains(where: { $0.id == target.id }) { return node }
-    for child in node.children {
-        if let hit = findParent(of: target, in: child) { return hit }
-    }
-    return nil
-}
-
-
-

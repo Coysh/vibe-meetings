@@ -14,6 +14,32 @@ struct MenuBarContentView: View {
 
         Text(statusLine).font(.headline)
 
+        if let failure = service.startFailure {
+            if failure.retry != nil {
+                Button("Try Recording Again") { Task { await service.retryFailedStart() } }
+            }
+            if let permission = failure.permission, let url = permission.settingsURL {
+                Button("Open \(permission.title) Settings…") { NSWorkspace.shared.open(url) }
+            }
+            Button("Dismiss") { service.dismissStartFailure() }
+        }
+
+        if banner.meetingEndSuggestion {
+            Text("Meeting may have ended — \(banner.meetingEndReason)")
+            Button("Keep Recording") { banner.dismissMeetingEnd() }
+        }
+
+        // Anything wrong with the recording in progress, with the fix where there is one.
+        if let controller = service.controller {
+            ForEach(controller.issues) { issue in
+                if let fix = issue.fix, let url = fix.settingsURL {
+                    Button("⚠︎ Others not captured — open \(fix.title) settings…") { NSWorkspace.shared.open(url) }
+                } else {
+                    Text("⚠︎ \(issue.message)")
+                }
+            }
+        }
+
         if let controller = service.controller {
             if controller.state == .recording || controller.state == .paused {
                 Button("Stop Recording") {
@@ -49,13 +75,13 @@ struct MenuBarContentView: View {
             env.appRouter.requestNewMeeting()
             env.presenter.show()
         }
-        Button("Open vibe-meetings") { env.presenter.show() }
+        Button("Open Vibe Meetings") { env.presenter.show() }
         Toggle("Show Floating Indicator", isOn: $env.showRecordingOverlay)
         SettingsLink { Text("Settings…") }
 
         Divider()
 
-        Button("Quit vibe-meetings") { NSApp.terminate(nil) }
+        Button("Quit Vibe Meetings") { NSApp.terminate(nil) }
     }
 
     private var statusLine: String {
@@ -69,6 +95,7 @@ struct MenuBarContentView: View {
             }
         }
         if service.isStarting { return "Starting recording…" }
+        if service.startFailure != nil { return "Couldn't start recording" }
         if let call = env.bannerCoordinator.unrecordedCall {
             let what = env.bannerCoordinator.matchedEvent?.title ?? call.client.appName.map { "\($0) call" } ?? "Call"
             return "\(what) — not recording"
@@ -96,9 +123,15 @@ struct MenuBarLabel: View {
                 HStack(spacing: 4) {
                     Image(nsImage: Self.redRecordIcon)
                     Text(Self.shortTime(controller.elapsed)).monospacedDigit()
+                    if !controller.issues.isEmpty {
+                        Image(systemName: "exclamationmark.triangle.fill")
+                    }
                 }
+            } else if env.recordingService.startFailure != nil {
+                Image(systemName: "exclamationmark.triangle.fill")
             } else if env.bannerCoordinator.unrecordedCall != nil {
-                Image(systemName: "exclamationmark.circle")
+                // A call is on but nothing is recording: "ready to record", not an error.
+                Image(systemName: "record.circle")
             } else {
                 Image(systemName: "waveform")
             }

@@ -103,8 +103,9 @@ final class SummaryGenerationService {
                     guard !Task.isCancelled else { return }
                     job.appendChunk(chunk)
                 }
-                // Persist completed summary.
-                try? await store.writeSummary(job.partialSummary, for: meetingID)
+                // Persist completed summary. If it can't be saved the job has
+                // failed — don't announce a summary that isn't on disk.
+                try await store.writeSummary(job.partialSummary, for: meetingID)
                 job.complete()
 
                 // Post a local notification unless silent (auto-generated) or disabled in settings.
@@ -118,6 +119,12 @@ final class SummaryGenerationService {
             }
             self?.tasks[meetingID] = nil
         }
+    }
+
+    /// Stop an in-flight job and forget it. The previously saved summary (if
+    /// any) is untouched, since a summary is only written when a job completes.
+    func cancel(for meetingID: UUID) {
+        clearJob(for: meetingID)
     }
 
     /// Clear a completed or failed job so it's no longer tracked.

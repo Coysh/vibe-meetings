@@ -1,7 +1,7 @@
 import SwiftUI
 
 /// Banner shown when the system microphone becomes active (another app like
-/// Zoom or Teams started using it) while VibeMeetings is not recording.
+/// Zoom or Teams started using it) while Vibe Meetings is not recording.
 struct MicActiveBanner: View {
     var eventTitle: String?
     var appName: String?
@@ -10,8 +10,9 @@ struct MicActiveBanner: View {
 
     var body: some View {
         HStack(spacing: 12) {
-            Image(systemName: "mic.fill")
-                .foregroundStyle(.green)
+            Image(systemName: "record.circle")
+                .foregroundStyle(.orange)
+                .accessibilityHidden(true)
 
             VStack(alignment: .leading, spacing: 2) {
                 if let title = eventTitle {
@@ -33,12 +34,14 @@ struct MicActiveBanner: View {
 
             Button("Start recording", action: onStart)
                 .buttonStyle(.borderedProminent)
-            Button("Dismiss", action: onDismiss)
+            // "Dismiss" here silences this call for good, so say so.
+            Button("Not a meeting", action: onDismiss)
                 .buttonStyle(.bordered)
+                .help("Stop reminding me about this call")
         }
         .padding(.horizontal, 14)
         .padding(.vertical, 10)
-        .background(.green.opacity(0.12))
+        .background(.orange.opacity(0.12))
         .overlay(alignment: .bottom) { Divider() }
     }
 }

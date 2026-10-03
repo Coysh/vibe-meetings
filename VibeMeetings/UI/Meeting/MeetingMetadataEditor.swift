@@ -1,12 +1,13 @@
 import SwiftUI
 import VMCore
 
-/// A form for editing meeting metadata (type, org, attendees, labels).
+/// A form for editing a meeting's title, type, organisation, attendees and labels.
 struct MeetingMetadataEditor: View {
     @Binding var meeting: Meeting
     let knownOrgs: [String]
     let onSave: (Meeting) -> Void
 
+    @State private var titleText: String
     @State private var selectedType: MeetingType
     @State private var selectedOrg: String
     @State private var customOrgText: String
@@ -15,6 +16,7 @@ struct MeetingMetadataEditor: View {
 
     @Environment(\.dismiss) private var dismiss
 
+    private static let noOrgTag = "__none__"
     private static let customOrgTag = "__custom__"
 
     init(meeting: Binding<Meeting>, knownOrgs: [String], onSave: @escaping (Meeting) -> Void) {
@@ -22,15 +24,18 @@ struct MeetingMetadataEditor: View {
         self.knownOrgs = knownOrgs
         self.onSave = onSave
         let m = meeting.wrappedValue
+        _titleText = State(initialValue: m.title)
         _selectedType = State(initialValue: m.resolvedType)
 
-        // Determine if the current org matches a known value or is custom.
+        // A meeting with no organisation must stay that way unless the user
+        // picks one — opening Edit and pressing Save used to silently assign
+        // the first configured organisation.
         let currentOrg = m.org ?? ""
         if currentOrg.isEmpty {
-            _selectedOrg = State(initialValue: knownOrgs.first ?? "")
+            _selectedOrg = State(initialValue: Self.noOrgTag)
             _customOrgText = State(initialValue: "")
-        } else if knownOrgs.contains(where: { $0.caseInsensitiveCompare(currentOrg) == .orderedSame }) {
-            _selectedOrg = State(initialValue: knownOrgs.first(where: { $0.caseInsensitiveCompare(currentOrg) == .orderedSame }) ?? currentOrg)
+        } else if let known = knownOrgs.first(where: { $0.caseInsensitiveCompare(currentOrg) == .orderedSame }) {
+            _selectedOrg = State(initialValue: known)
             _customOrgText = State(initialValue: "")
         } else {
             _selectedOrg = State(initialValue: Self.customOrgTag)
@@ -42,95 +47,68 @@ struct MeetingMetadataEditor: View {
     }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            Text("Edit Metadata").font(.headline)
+        VStack(spacing: 0) {
+            Form {
+                TextField("Title", text: $titleText)
 
-            // Type picker
-            HStack {
-                Text("Type")
-                    .frame(width: 80, alignment: .trailing)
-                Picker("", selection: $selectedType) {
+                Picker("Type", selection: $selectedType) {
                     Text("1:1").tag(MeetingType.oneOnOne)
                     Text("Group").tag(MeetingType.group)
                 }
                 .pickerStyle(.segmented)
-                .frame(width: 200)
-            }
 
-            // Org picker
-            HStack {
-                Text("Org")
-                    .frame(width: 80, alignment: .trailing)
-                Picker("", selection: $selectedOrg) {
+                Picker("Organisation", selection: $selectedOrg) {
+                    Text("None").tag(Self.noOrgTag)
+                    if !knownOrgs.isEmpty { Divider() }
                     ForEach(knownOrgs, id: \.self) { org in
                         Text(org).tag(org)
                     }
                     Divider()
                     Text("Other…").tag(Self.customOrgTag)
                 }
-                .frame(width: 220)
-            }
 
-            if selectedOrg == Self.customOrgTag {
-                HStack {
-                    Text("")
-                        .frame(width: 80, alignment: .trailing)
-                    TextField("Custom org name", text: $customOrgText)
-                        .textFieldStyle(.roundedBorder)
+                if selectedOrg == Self.customOrgTag {
+                    TextField("Organisation name", text: $customOrgText)
                 }
-            }
 
-            // Attendees
-            HStack(alignment: .top) {
-                Text("Attendees")
-                    .frame(width: 80, alignment: .trailing)
-                TextField("Comma-separated names", text: $attendeesText)
-                    .textFieldStyle(.roundedBorder)
+                TextField("Attendees", text: $attendeesText, prompt: Text("Comma-separated names"))
+                TextField("Labels", text: $labelsText, prompt: Text("Comma-separated labels"))
             }
+            .formStyle(.grouped)
 
-            // Labels
-            HStack(alignment: .top) {
-                Text("Labels")
-                    .frame(width: 80, alignment: .trailing)
-                TextField("Comma-separated labels", text: $labelsText)
-                    .textFieldStyle(.roundedBorder)
-            }
+            Divider()
 
             HStack {
                 Spacer()
                 Button("Cancel") { dismiss() }
-                    .keyboardShortcut(.escape)
+                    .keyboardShortcut(.cancelAction)
                 Button("Save") { save() }
                     .buttonStyle(.borderedProminent)
                     .keyboardShortcut(.defaultAction)
+                    .disabled(titleText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
             }
+            .padding()
         }
-        .padding()
-        .frame(width: 400)
+        .frame(minWidth: 440, idealWidth: 460, minHeight: 360)
+        .navigationTitle("Edit meeting")
     }
 
     private func save() {
         var updated = meeting
+        updated.title = titleText.trimmingCharacters(in: .whitespacesAndNewlines)
         updated.meetingType = selectedType
 
         let org: String
-        if selectedOrg == Self.customOrgTag {
-            org = customOrgText.trimmingCharacters(in: .whitespacesAndNewlines)
-        } else {
-            org = selectedOrg
+        switch selectedOrg {
+        case Self.noOrgTag: org = ""
+        case Self.customOrgTag: org = customOrgText.trimmingCharacters(in: .whitespacesAndNewlines)
+        default: org = selectedOrg
         }
         updated.org = org.isEmpty ? nil : org
 
-        let attendees = attendeesText
-            .split(separator: ",")
-            .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
-            .filter { !$0.isEmpty }
+        let attendees = attendeesText.commaSeparatedItems
         updated.attendees = attendees.isEmpty ? nil : attendees
-
-        let labels = labelsText
-            .split(separator: ",")
-            .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
-            .filter { !$0.isEmpty }
+        let labels = labelsText.commaSeparatedItems
         updated.labels = labels.isEmpty ? nil : labels
 
         meeting = updated

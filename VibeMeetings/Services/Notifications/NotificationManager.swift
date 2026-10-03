@@ -90,8 +90,8 @@ final class NotificationManager {
         let notMeeting = action(Action.notAMeeting, "Not a meeting", .destructive)
         let recordEvent = action(Action.recordEvent, "Record")
         let join = action(Action.joinAndRecord, "Join & Record")
-        let stop = action(Action.stopRecording, "Stop Recording", .destructive)
-        let keep = action(Action.keepRecording, "Keep Recording")
+        let stop = action(Action.stopRecording, "Stop recording", .destructive)
+        let keep = action(Action.keepRecording, "Keep recording")
 
         let legacyStart = action(Action.legacyStartRecording, "Start Recording")
         let legacyListen = action(Action.legacyStartListening, "Start Listening")
@@ -249,6 +249,8 @@ final class NotificationManager {
         content.title = "Meeting may have ended"
         content.body = "\(reason). Stop recording?"
         content.sound = .default
+        // A forgotten recording is exactly what Focus modes would otherwise hide.
+        content.interruptionLevel = urgentLevel
         content.categoryIdentifier = Category.meetingEnd
         await add(identifier: ID.meetingEnd, content: content)
     }
@@ -278,8 +280,8 @@ final class NotificationManager {
 
     func postMicSilence() async {
         let content = UNMutableNotificationContent()
-        content.title = "No Microphone Input"
-        content.body = "Your microphone doesn't seem to be picking up any audio. Check it isn't muted or that the right input device is selected."
+        content.title = "No microphone input"
+        content.body = "Your microphone doesn't seem to be picking up any audio. Check it isn't muted, or choose a different input in Settings → Recording."
         content.sound = .default
         content.interruptionLevel = urgentLevel
         await add(identifier: ID.micSilence, content: content)
@@ -287,7 +289,7 @@ final class NotificationManager {
 
     func postSummaryReady(meetingID: UUID, title: String) async {
         let content = UNMutableNotificationContent()
-        content.title = "Summary Ready"
+        content.title = "Summary ready"
         content.body = "Summary for “\(title)” is complete."
         content.sound = .default
         content.categoryIdentifier = Category.summaryReady
@@ -297,7 +299,7 @@ final class NotificationManager {
 
     func postTestNotification() async {
         let content = UNMutableNotificationContent()
-        content.title = "vibe-meetings"
+        content.title = "Vibe Meetings"
         content.body = "Notifications are working! You'll see alerts for meetings and summaries."
         content.sound = .default
         await add(identifier: "vm.test.\(UUID().uuidString)", content: content)

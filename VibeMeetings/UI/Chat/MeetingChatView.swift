@@ -7,7 +7,9 @@ import VMSummarization
 /// Can be scoped to a specific meeting via `focusedMeetingID`.
 struct MeetingChatView: View {
     @Environment(AppEnvironment.self) private var env
-    @State private var chatService = MeetingChatService()
+    /// Owned by the environment so the conversation outlives this view.
+    private var chatService: MeetingChatService { env.chatService(for: focusedMeetingID) }
+    @State private var confirmClear = false
     @State private var inputText = ""
     @State private var showSettings = false
 
@@ -50,7 +52,7 @@ struct MeetingChatView: View {
     /// Resolved title for the focused meeting, if any.
     private var focusedMeetingTitle: String? {
         guard let id = focusedMeetingID else { return nil }
-        return collectAllMeetings(from: env.folderTree).first(where: { $0.id == id })?.title
+        return env.folderTree?.meetingNode(id: id)?.meeting?.title
             ?? env.activeRecordingController?.meetingHandle?.meeting.title
     }
 
@@ -78,15 +80,21 @@ struct MeetingChatView: View {
             }
             .buttonStyle(.borderless)
             .help("Chat settings")
+            .accessibilityLabel("Chat settings")
             if !chatService.messages.isEmpty {
                 Button {
-                    chatService.clearHistory()
+                    confirmClear = true
                 } label: {
                     Image(systemName: "trash")
                         .font(.caption)
                 }
                 .buttonStyle(.borderless)
                 .help("Clear chat history")
+                .accessibilityLabel("Clear chat history")
+                .confirmationDialog("Clear this conversation?", isPresented: $confirmClear, titleVisibility: .visible) {
+                    Button("Clear conversation", role: .destructive) { chatService.clearHistory() }
+                    Button("Cancel", role: .cancel) {}
+                }
             }
         }
         .padding(12)
@@ -111,7 +119,8 @@ struct MeetingChatView: View {
             Toggle("Limit to selected meetings", isOn: $filterMeetings)
                 .font(.caption)
                 .onChange(of: filterMeetings) {
-                    chatService.includedMeetingIDs = filterMeetings ? selectedMeetingIDs : nil
+                    // "Nothing ticked" must mean "no restriction", the same as the rows below.
+                    chatService.includedMeetingIDs = filterMeetings && !selectedMeetingIDs.isEmpty ? selectedMeetingIDs : nil
                 }
 
             if filterMeetings {
@@ -158,36 +167,29 @@ struct MeetingChatView: View {
 
     @ViewBuilder
     private var meetingPicker: some View {
-        let allMeetings = collectAllMeetings(from: env.folderTree)
+        let allMeetings = (env.folderTree?.allMeetings ?? [])
             .sorted { $0.startedAt > $1.startedAt }
 
         ScrollView {
             LazyVStack(alignment: .leading, spacing: 2) {
                 ForEach(allMeetings, id: \.id) { meeting in
-                    HStack(spacing: 6) {
-                        Image(systemName: selectedMeetingIDs.contains(meeting.id)
-                              ? "checkmark.circle.fill" : "circle")
-                            .foregroundStyle(selectedMeetingIDs.contains(meeting.id)
-                                             ? Color.accentColor : .secondary)
-                            .font(.caption)
+                    Toggle(isOn: Binding(
+                        get: { selectedMeetingIDs.contains(meeting.id) },
+                        set: { on in
+                            if on { selectedMeetingIDs.insert(meeting.id) } else { selectedMeetingIDs.remove(meeting.id) }
+                            chatService.includedMeetingIDs = selectedMeetingIDs.isEmpty ? nil : selectedMeetingIDs
+                        }
+                    )) {
                         VStack(alignment: .leading, spacing: 1) {
                             Text(meeting.title)
                                 .font(.caption)
                                 .lineLimit(1)
                             Text(meeting.startedAt.formatted(date: .abbreviated, time: .shortened))
                                 .font(.caption2)
-                                .foregroundStyle(.tertiary)
+                                .foregroundStyle(.secondary)
                         }
                     }
-                    .contentShape(Rectangle())
-                    .onTapGesture {
-                        if selectedMeetingIDs.contains(meeting.id) {
-                            selectedMeetingIDs.remove(meeting.id)
-                        } else {
-                            selectedMeetingIDs.insert(meeting.id)
-                        }
-                        chatService.includedMeetingIDs = selectedMeetingIDs.isEmpty ? nil : selectedMeetingIDs
-                    }
+                    .toggleStyle(.checkbox)
                 }
             }
             .padding(.horizontal, 4)
@@ -278,18 +280,27 @@ struct MeetingChatView: View {
         case .assistant:
             VStack(alignment: .leading, spacing: 6) {
                 if !message.referencedMeetings.isEmpty {
-                    HStack(spacing: 4) {
-                        Text("Based on:")
+                    VStack(alignment: .leading, spacing: 3) {
+                        Text("Based on")
                             .font(.caption2)
-                            .foregroundStyle(.tertiary)
-                        ForEach(message.referencedMeetings) { ref in
-                            Text(ref.title)
-                                .font(.caption2)
-                                .padding(.horizontal, 6)
-                                .padding(.vertical, 2)
-                                .background(Color.secondary.opacity(0.12), in: Capsule())
-                                .foregroundStyle(.secondary)
-                                .lineLimit(1)
+                            .foregroundStyle(.secondary)
+                        // Wraps (it used to overflow the panel) and each chip opens its meeting.
+                        FlowLayout(spacing: 4) {
+                            ForEach(message.referencedMeetings) { ref in
+                                Button {
+                                    env.appRouter.selectMeetingID = ref.id
+                                    env.presenter.show()
+                                } label: {
+                                    Text(ref.title)
+                                        .font(.caption2)
+                                        .lineLimit(1)
+                                        .padding(.horizontal, 6)
+                                        .padding(.vertical, 2)
+                                        .background(Color.secondary.opacity(0.12), in: Capsule())
+                                }
+                                .buttonStyle(.plain)
+                                .help("Open “\(ref.title)”")
+                            }
                         }
                     }
                 }
@@ -299,7 +310,9 @@ struct MeetingChatView: View {
                         Text("Thinking…").font(.caption).foregroundStyle(.secondary)
                     }
                 } else {
-                    Text(LocalizedStringKey(message.content))
+                    // Inline markdown (bold, italics, code, links), with the model's text
+                    // treated as text — not as a localisation key.
+                    Text(Self.markdown(message.content))
                         .textSelection(.enabled)
                 }
             }
@@ -311,19 +324,33 @@ struct MeetingChatView: View {
 
     @ViewBuilder
     private var inputBar: some View {
-        HStack(spacing: 8) {
-            TextField(focusedMeetingID != nil ? "Ask about this meeting…" : "Ask about your meetings…", text: $inputText)
+        HStack(alignment: .bottom, spacing: 8) {
+            TextField(focusedMeetingID != nil ? "Ask about this meeting…" : "Ask about your meetings…", text: $inputText, axis: .vertical)
                 .textFieldStyle(.plain)
+                .lineLimit(1...5)
                 .onSubmit { sendMessage() }
-            Button {
-                sendMessage()
-            } label: {
-                Image(systemName: "arrow.up.circle.fill")
-                    .font(.title2)
-                    .foregroundStyle(canSend ? Color.accentColor : Color.secondary)
+            if chatService.isStreaming {
+                Button {
+                    chatService.stopStreaming()
+                } label: {
+                    Image(systemName: "stop.circle.fill").font(.title2)
+                }
+                .buttonStyle(.borderless)
+                .help("Stop answering")
+                .accessibilityLabel("Stop answering")
+            } else {
+                Button {
+                    sendMessage()
+                } label: {
+                    Image(systemName: "arrow.up.circle.fill")
+                        .font(.title2)
+                        .foregroundStyle(canSend ? Color.accentColor : Color.secondary)
+                }
+                .buttonStyle(.borderless)
+                .disabled(!canSend)
+                .help("Send")
+                .accessibilityLabel("Send")
             }
-            .buttonStyle(.borderless)
-            .disabled(!canSend)
         }
         .padding(12)
     }
@@ -368,15 +395,10 @@ struct MeetingChatView: View {
 
     // MARK: - Helpers
 
-    private func collectAllMeetings(from node: FolderNode?) -> [Meeting] {
-        guard let node else { return [] }
-        var result: [Meeting] = []
-        if node.isMeeting, let m = node.meeting {
-            result.append(m)
-        }
-        for child in node.children {
-            result.append(contentsOf: collectAllMeetings(from: child))
-        }
-        return result
+    private static func markdown(_ text: String) -> AttributedString {
+        (try? AttributedString(
+            markdown: text,
+            options: .init(interpretedSyntax: .inlineOnlyPreservingWhitespace)
+        )) ?? AttributedString(text)
     }
 }

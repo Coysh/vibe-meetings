@@ -1,63 +1,60 @@
-import SwiftUI
 import EventKit
+import SwiftUI
 import VMCalendar
 
-struct CalendarAccessView: View {
+/// Onboarding step: optional calendar access and notification permission, both
+/// explained before being requested.
+struct CalendarAndNotificationsStep: View {
     @Environment(AppEnvironment.self) private var env
-    @State private var status: EKAuthorizationStatus = EKEventStore.authorizationStatus(for: .event)
+    @State private var calendar: EKAuthorizationStatus = EKEventStore.authorizationStatus(for: .event)
+    @State private var notificationsRequested = false
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            Label("Calendar (optional)", systemImage: "calendar").font(.title3.bold())
+        VStack(alignment: .leading, spacing: 18) {
+            VStack(alignment: .leading, spacing: 8) {
+                Label("Calendar (optional)", systemImage: "calendar").font(.headline)
+                Text("Names recordings after your calendar events, reminds you before a meeting with a join link, and files recurring meetings together.")
+                    .font(.callout).foregroundStyle(.secondary)
+                calendarRow
+            }
 
-            row
-
-            Text("Lets the app default a meeting's title to your event title, suggest recording when a Teams meeting starts, and route recurring meetings into the same folder.")
-                .font(.caption)
-                .foregroundStyle(.secondary)
+            VStack(alignment: .leading, spacing: 8) {
+                Label("Notifications (recommended)", systemImage: "bell").font(.headline)
+                Text("Lets Vibe Meetings tell you when a call starts that isn't being recorded, and when a recording has finished. Reminders work best with the alert style set to “Alerts” in System Settings → Notifications.")
+                    .font(.callout).foregroundStyle(.secondary)
+                if notificationsRequested {
+                    Label("Done — you can adjust these in System Settings", systemImage: "checkmark.circle.fill")
+                        .foregroundStyle(.green)
+                } else {
+                    Button("Allow notifications") {
+                        Task {
+                            await env.notifications.ensureAuthorized()
+                            notificationsRequested = true
+                        }
+                    }
+                }
+            }
         }
-        .padding()
-        .task { status = env.calendarService.authorizationStatus() }
+        .task { calendar = env.calendarService.authorizationStatus() }
     }
 
     @ViewBuilder
-    private var row: some View {
-        switch status {
+    private var calendarRow: some View {
+        switch calendar {
         case .notDetermined:
-            HStack {
-                Image(systemName: "questionmark.circle").foregroundStyle(.orange)
-                Text("Not yet requested")
-                Spacer()
-                Button("Request access") {
-                    Task { status = await env.calendarService.requestAccess() }
-                }
-            }
-        case .denied, .restricted, .writeOnly:
-            HStack {
-                Image(systemName: "xmark.circle.fill").foregroundStyle(.red)
-                Text("Calendar access is off — calendar features disabled")
-                Spacer()
-                Button("Open System Settings…") { openCalendarSettings() }
+            Button("Allow calendar access") {
+                Task { calendar = await env.calendarService.requestAccess() }
             }
         case .fullAccess, .authorized:
-            HStack {
-                Image(systemName: "checkmark.circle.fill").foregroundStyle(.green)
-                Text("Calendar access granted")
-                Spacer()
+            Label("Calendar access is on", systemImage: "checkmark.circle.fill").foregroundStyle(.green)
+        default:
+            Label("Calendar access is off — calendar features are disabled", systemImage: "xmark.circle.fill")
+                .foregroundStyle(.orange)
+            Button("Open Calendar settings…") {
+                if let url = URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_Calendars") {
+                    NSWorkspace.shared.open(url)
+                }
             }
-        @unknown default:
-            HStack {
-                Image(systemName: "questionmark.circle").foregroundStyle(.orange)
-                Text("Unknown status")
-                Spacer()
-                Button("Re-check") { status = env.calendarService.authorizationStatus() }
-            }
-        }
-    }
-
-    private func openCalendarSettings() {
-        if let url = URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_Calendars") {
-            NSWorkspace.shared.open(url)
         }
     }
 }

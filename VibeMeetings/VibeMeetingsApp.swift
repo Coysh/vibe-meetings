@@ -9,7 +9,9 @@ struct VibeMeetingsApp: App {
     @AppStorage(AppEnvironment.menuBarEnabledKey) private var showMenuBar = true
 
     var body: some Scene {
-        WindowGroup("vibe-meetings", id: MainWindowPresenter.windowID) {
+        // A single library window (not a WindowGroup, which would let you open
+        // several copies of the same library).
+        Window("Vibe Meetings", id: MainWindowPresenter.windowID) {
             Group {
                 if let env = appEnv {
                     RootView()
@@ -29,9 +31,30 @@ struct VibeMeetingsApp: App {
                     appEnv?.presenter.show()
                 }
                 .keyboardShortcut("n")
+                Button("New Folder…") {
+                    appEnv?.appRouter.requestNewFolder()
+                    appEnv?.presenter.show()
+                }
+                .keyboardShortcut("n", modifiers: [.command, .shift])
             }
+            CommandMenu("Recording") {
+                if appEnv?.recordingService.isRecording == true {
+                    Button("Stop Recording") {
+                        Task { await appEnv?.recordingService.stop() }
+                    }
+                    .keyboardShortcut("r", modifiers: [.command, .shift])
+                } else {
+                    Button("Record Now") {
+                        Task { await appEnv?.recordingService.startDetectedCall() }
+                    }
+                    .keyboardShortcut("r", modifiers: [.command, .shift])
+                    .disabled(appEnv?.recordingService.isBusy ?? true)
+                }
+            }
+            SidebarCommands()
+            InspectorCommands()
             CommandGroup(replacing: .appInfo) {
-                Button("About vibe-meetings") {
+                Button("About Vibe Meetings") {
                     showAboutWindow()
                 }
                 Divider()
@@ -142,7 +165,7 @@ private func showAboutWindow() {
     let hosting = NSHostingController(rootView: AboutView())
     let window = NSWindow(contentViewController: hosting)
     window.identifier = NSUserInterfaceItemIdentifier(windowID)
-    window.title = "About vibe-meetings"
+    window.title = "About Vibe Meetings"
     window.styleMask = [.titled, .closable]
     window.center()
     window.makeKeyAndOrderFront(nil)

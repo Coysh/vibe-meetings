@@ -27,6 +27,20 @@ final class AppEnvironment {
     let meetingEndDetector = MeetingEndDetector()
     let notifications = NotificationManager()
     let appRouter = AppRouter()
+    /// Chat conversations, kept per scope ("all meetings" or one meeting) so the
+    /// history survives the chat panel being closed, re-scoped or recreated.
+    @ObservationIgnored private var chatServices: [UUID: MeetingChatService] = [:]
+
+    func chatService(for focusedMeetingID: UUID?) -> MeetingChatService {
+        let key = focusedMeetingID ?? UUID(uuidString: "00000000-0000-0000-0000-000000000000")!
+        if let existing = chatServices[key] { return existing }
+        let service = MeetingChatService()
+        chatServices[key] = service
+        return service
+    }
+
+    /// The failure currently shown in the main window's error alert, if any.
+    var presentedError: PresentedError?
     @ObservationIgnored let presenter = MainWindowPresenter()
     @ObservationIgnored let eventReminders: EventReminderScheduler
     @ObservationIgnored private(set) lazy var recordingService = RecordingSessionService(env: self)
@@ -103,6 +117,9 @@ final class AppEnvironment {
     private static let notifyAtEventStartKey = "VibeMeetings.Notify.AtEventStart"
     private static let detectBrowserCallsKey = "VibeMeetings.Detection.BrowserCalls"
     private static let showOverlayKey = "VibeMeetings.Overlay.Enabled"
+    private static let onboardingKey = "VibeMeetings.Onboarding.Completed"
+    private static let echoCancellationKey = "VibeMeetings.Audio.EchoCancellation"
+    private static let saveEchoCancelledMicKey = "VibeMeetings.Audio.SaveEchoCancelledMic"
     /// `@AppStorage` key for the menu bar extra (read by the App scene).
     static let menuBarEnabledKey = "VibeMeetings.MenuBar.Enabled"
 
@@ -152,6 +169,31 @@ final class AppEnvironment {
     /// Treat a browser using the microphone as a call (Google Meet, Teams web…).
     var detectBrowserCalls: Bool {
         didSet { UserDefaults.standard.set(detectBrowserCalls, forKey: Self.detectBrowserCallsKey) }
+    }
+
+    /// Whether first-run setup has been completed (or skipped). Installs that
+    /// already have permissions decided or a chosen folder count as set up, so an
+    /// update never shows the welcome flow to an existing user.
+    var hasCompletedOnboarding: Bool {
+        didSet {
+            UserDefaults.standard.set(hasCompletedOnboarding, forKey: Self.onboardingKey)
+            // Finishing setup hands over to the normal launch-time permission
+            // re-check (see `bootstrap`).
+            if hasCompletedOnboarding && !oldValue { Task { await requestPermissionsIfNeeded() } }
+        }
+    }
+
+    /// Remove speaker echo from the microphone before it is transcribed, using
+    /// the system audio as the reference. Harmless on headphones (detected
+    /// automatically and passed through untouched).
+    var echoCancellationEnabled: Bool {
+        didSet { UserDefaults.standard.set(echoCancellationEnabled, forKey: Self.echoCancellationKey) }
+    }
+
+    /// Diagnostic: also save the echo-cancelled mic as `mic-aec.wav` next to the
+    /// recording so the result can be listened to. Never used for transcription.
+    var saveEchoCancelledMic: Bool {
+        didSet { UserDefaults.standard.set(saveEchoCancelledMic, forKey: Self.saveEchoCancelledMicKey) }
     }
 
     /// Show the floating "not recording / recording" indicator.
@@ -226,6 +268,16 @@ final class AppEnvironment {
         self.notifyAtEventStart = defaults.object(forKey: Self.notifyAtEventStartKey) as? Bool ?? true
         self.detectBrowserCalls = defaults.object(forKey: Self.detectBrowserCallsKey) as? Bool ?? true
         self.showRecordingOverlay = defaults.object(forKey: Self.showOverlayKey) as? Bool ?? true
+        if let stored = defaults.object(forKey: Self.onboardingKey) as? Bool {
+            self.hasCompletedOnboarding = stored
+        } else {
+            let existingInstall = AVCaptureDevice.authorizationStatus(for: .audio) != .notDetermined
+                || defaults.data(forKey: "VibeMeetings.RootURL.bookmark") != nil
+            self.hasCompletedOnboarding = existingInstall
+            defaults.set(existingInstall, forKey: Self.onboardingKey)
+        }
+        self.echoCancellationEnabled = defaults.object(forKey: Self.echoCancellationKey) as? Bool ?? true
+        self.saveEchoCancelledMic = defaults.object(forKey: Self.saveEchoCancelledMicKey) as? Bool ?? false
 
         if storedSummKind == OpenAIEngine.kind && !storedOpenAIKey.isEmpty {
             self.summarizationEngine = OpenAIEngine(apiKey: storedOpenAIKey, promptBundle: .main)
@@ -275,16 +327,21 @@ final class AppEnvironment {
         self.overlay = overlay
 
         Task {
-            // Request permissions on every launch. If already granted these are
-            // no-ops; if macOS reset them after an app update (ad-hoc signing
-            // changes the code identity) the user gets re-prompted immediately
-            // instead of discovering broken features later.
-            _ = await AVCaptureDevice.requestAccess(for: .audio)
-            _ = await calendarService.requestAccess()
-            await notifications.ensureAuthorized()
+            // On a first launch the onboarding flow asks for each permission with an
+            // explanation. After that, re-check on every launch: if macOS reset a
+            // permission (ad-hoc signing changes the code identity on update) the
+            // user is re-prompted immediately instead of discovering broken
+            // features later. Already-granted requests are no-ops.
+            if hasCompletedOnboarding { await requestPermissionsIfNeeded() }
             bannerCoordinator.start()
             eventReminders.start()
         }
+    }
+
+    private func requestPermissionsIfNeeded() async {
+        _ = await AVCaptureDevice.requestAccess(for: .audio)
+        _ = await calendarService.requestAccess()
+        await notifications.ensureAuthorized()
     }
 
     private func startTreeSubscription() {
@@ -322,6 +379,26 @@ final class AppEnvironment {
         } else {
             UserDefaults.standard.removeObject(forKey: Self.micDeviceUIDKey)
         }
+        // A recording in progress follows the change immediately — this used to
+        // be wired through a view inside the main window, so it silently did
+        // nothing when that window was closed (the normal state during a call).
+        recordingService.controller?.switchMicIfNeeded()
+    }
+
+    /// Choose the transcription model and remember it.
+    func selectTranscriptionModel(_ id: String) {
+        selectedModelId = id
+        UserDefaults.standard.set(id, forKey: "VibeMeetings.SelectedTranscriptionModelId")
+    }
+
+    /// Display name of the selected microphone ("System Default" when none is chosen).
+    var selectedMicDeviceName: String {
+        guard let uid = selectedMicDeviceUID,
+              let device = AudioDeviceEnumerator.inputDevices().first(where: { $0.uid == uid })
+        else {
+            return AudioDeviceEnumerator.inputDevices().first(where: { $0.isDefault })?.name ?? "System Default"
+        }
+        return device.name
     }
 
     /// Update the Ollama endpoint, persist, rebuild the engine, and update

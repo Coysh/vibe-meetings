@@ -11,6 +11,7 @@ struct MeetingEndBanner: View {
         HStack(spacing: 12) {
             Image(systemName: "clock.badge.checkmark")
                 .foregroundStyle(.orange)
+                .accessibilityHidden(true)
 
             VStack(alignment: .leading, spacing: 2) {
                 Text("**\(reason.isEmpty ? "Meeting may have ended" : reason)**")
