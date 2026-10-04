@@ -71,6 +71,7 @@
 		0024CB346D81F8C5129757DB /* OnboardingFlowView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1A32B552A8C86B4E21488435 /* OnboardingFlowView.swift */; };
 		5E309A88E600441EFC1652D8 /* FolderOverviewView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8DF56C7116BEB8AEBE66C847 /* FolderOverviewView.swift */; };
 		95E0C57C7A6BB5B408B40BB9 /* Theme.swift in Sources */ = {isa = PBXBuildFile; fileRef = 392FB64639A007C213E48C0F /* Theme.swift */; };
+		7766D8ACF27BDEE243B0882D /* SpeakerDiarizationService.swift in Sources */ = {isa = PBXBuildFile; fileRef = D4CF106D9E08CE26BA7083F5 /* SpeakerDiarizationService.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
@@ -138,6 +139,7 @@
 		1A32B552A8C86B4E21488435 /* OnboardingFlowView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OnboardingFlowView.swift; sourceTree = "<group>"; };
 		8DF56C7116BEB8AEBE66C847 /* FolderOverviewView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FolderOverviewView.swift; sourceTree = "<group>"; };
 		392FB64639A007C213E48C0F /* Theme.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Theme.swift; sourceTree = "<group>"; };
+		D4CF106D9E08CE26BA7083F5 /* SpeakerDiarizationService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SpeakerDiarizationService.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -359,6 +361,7 @@
 				B1A27004B707A5F18BBB7638 /* MeetingDraftFactory.swift */,
 				5021C02F30EAF2F4AF275719 /* RecordingSessionService.swift */,
 				90DA5D87B16D298D25DDCFC7 /* RecordingController.swift */,
+				D4CF106D9E08CE26BA7083F5 /* SpeakerDiarizationService.swift */,
 			);
 			path = Recording;
 			sourceTree = "<group>";
@@ -487,6 +490,7 @@
 			isa = PBXSourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				7766D8ACF27BDEE243B0882D /* SpeakerDiarizationService.swift in Sources */,
 				95E0C57C7A6BB5B408B40BB9 /* Theme.swift in Sources */,
 				5E309A88E600441EFC1652D8 /* FolderOverviewView.swift in Sources */,
 				0024CB346D81F8C5129757DB /* OnboardingFlowView.swift in Sources */,

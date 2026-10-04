@@ -22,6 +22,7 @@ final class AppEnvironment {
     let calendarService: any CalendarService
     let bannerCoordinator: BannerCoordinator
     let summaryService = SummaryGenerationService()
+    let diarizationService = SpeakerDiarizationService()
     let updateChecker = UpdateChecker()
     let sparkleUpdater = SparkleUpdater()
     let meetingEndDetector = MeetingEndDetector()
@@ -118,6 +119,7 @@ final class AppEnvironment {
     private static let detectBrowserCallsKey = "VibeMeetings.Detection.BrowserCalls"
     private static let showOverlayKey = "VibeMeetings.Overlay.Enabled"
     private static let onboardingKey = "VibeMeetings.Onboarding.Completed"
+    private static let speakerDetectionKey = "VibeMeetings.Speakers.DetectAfterMeeting"
     private static let echoCancellationKey = "VibeMeetings.Audio.EchoCancellation"
     private static let saveEchoCancelledMicKey = "VibeMeetings.Audio.SaveEchoCancelledMic"
     /// `@AppStorage` key for the menu bar extra (read by the App scene).
@@ -188,6 +190,12 @@ final class AppEnvironment {
     /// automatically and passed through untouched).
     var echoCancellationEnabled: Bool {
         didSet { UserDefaults.standard.set(echoCancellationEnabled, forKey: Self.echoCancellationKey) }
+    }
+
+    /// After a recording, split "Others" into individual speakers (Speaker 1,
+    /// Speaker 2 …) by analysing the saved call audio on this Mac.
+    var speakerDetectionEnabled: Bool {
+        didSet { UserDefaults.standard.set(speakerDetectionEnabled, forKey: Self.speakerDetectionKey) }
     }
 
     /// Diagnostic: also save the echo-cancelled mic as `mic-aec.wav` next to the
@@ -276,6 +284,7 @@ final class AppEnvironment {
             self.hasCompletedOnboarding = existingInstall
             defaults.set(existingInstall, forKey: Self.onboardingKey)
         }
+        self.speakerDetectionEnabled = defaults.object(forKey: Self.speakerDetectionKey) as? Bool ?? true
         self.echoCancellationEnabled = defaults.object(forKey: Self.echoCancellationKey) as? Bool ?? true
         self.saveEchoCancelledMic = defaults.object(forKey: Self.saveEchoCancelledMicKey) as? Bool ?? false
 

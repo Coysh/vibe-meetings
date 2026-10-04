@@ -194,6 +194,14 @@ private struct RecordingSettingsView: View {
                     .fixedSize(horizontal: false, vertical: true)
             }
 
+            Section("Speakers") {
+                Toggle("Identify individual speakers after each meeting", isOn: $env.speakerDetectionEnabled)
+                Text("On group calls, splits “Others” into Speaker 1, Speaker 2 … so you can see who said what and rename them. Runs on this Mac after the recording stops; the speaker models (about 20 MB) download once from Hugging Face. 1:1 calls are left as they are. For past meetings, use Detect speakers… under a transcript.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+
             Section("Ending a recording") {
                 Toggle("Suggest stopping when a meeting seems to have ended", isOn: Binding(
                     get: { env.meetingEndDetector.autoEndEnabled },

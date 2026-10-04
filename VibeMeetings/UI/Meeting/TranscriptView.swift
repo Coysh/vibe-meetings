@@ -272,6 +272,13 @@ struct TranscriptView: View {
             set: { if !$0 { renameSpeakerID = nil } }
         )) {
             TextField("Name", text: $renameText)
+            // One-click names from the calendar invite (people not already used).
+            ForEach(renameSuggestions, id: \.self) { name in
+                Button(name) {
+                    if let id = renameSpeakerID { onRenameSpeaker?(id, name) }
+                    renameSpeakerID = nil
+                }
+            }
             Button("Cancel", role: .cancel) { renameSpeakerID = nil }
             Button("Rename") {
                 let name = renameText.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -332,7 +339,7 @@ struct TranscriptView: View {
         HStack(spacing: 8) {
             Text(nameByID[group.speakerId] ?? group.speakerId.capitalized)
                 .font(.subheadline.bold())
-                .foregroundStyle(Self.speakerColor(group.channel))
+                .foregroundStyle(Self.speakerColor(speakerId: group.speakerId, channel: group.channel))
             Text(group.start.formattedTimestamp)
                 .font(.caption2.monospacedDigit())
                 .foregroundStyle(.secondary)
@@ -346,6 +353,15 @@ struct TranscriptView: View {
             }
         }
         .accessibilityElement(children: .combine)
+    }
+
+    /// Attendees from the calendar invite who aren't already a named speaker (max 3).
+    private var renameSuggestions: [String] {
+        let used = Set(participants.map { $0.displayName.lowercased() })
+        return (meeting?.attendees ?? [])
+            .filter { !$0.isEmpty && $0.lowercased() != "you" && !used.contains($0.lowercased()) }
+            .prefix(3)
+            .map { $0 }
     }
 
     private func stepMatch(_ delta: Int) {
@@ -462,11 +478,18 @@ struct TranscriptView: View {
         }
     }
 
-    static func speakerColor(_ channel: AudioChannel) -> Color {
+    /// You are blue; each remote speaker gets their own colour ("others" stays
+    /// purple; "others-N" cycle through a palette), so a group call reads at a glance.
+    static func speakerColor(speakerId: String, channel: AudioChannel) -> Color {
         switch channel {
         case .mic: return .blue
-        case .system: return .purple
         case .mixed: return .secondary
+        case .system:
+            let palette: [Color] = [.purple, .teal, .orange, .pink, .indigo, .brown, .mint]
+            guard speakerId.hasPrefix("others-"), let n = Int(speakerId.dropFirst("others-".count)), n > 0 else {
+                return .purple
+            }
+            return palette[(n - 1) % palette.count]
         }
     }
 

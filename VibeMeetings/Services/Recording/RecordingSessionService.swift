@@ -176,7 +176,7 @@ final class RecordingSessionService {
         guard let controller, controller.state == .recording || controller.state == .paused,
               let handle = controller.meetingHandle
         else { return }
-        _ = await controller.stop()
+        let captureResult = await controller.stop()
         guard self.controller === controller else { return }
 
         let meetingID = handle.meeting.id
@@ -203,12 +203,27 @@ final class RecordingSessionService {
             await env.notifications.postRecordingSaved(meetingID: meetingID, title: meeting.title)
         }
 
-        // Auto-generate the summary in the background (silently, no
-        // notification) from the dual-channel live transcript, which
-        // `RecordingController.stop()` has already cleaned and persisted.
+        // Then, in the background: split "Others" into individual speakers from
+        // the saved audio (if enabled), and write the summary from the result —
+        // so the summary can say who said what. Both are silent. If speaker
+        // detection is off, fails, or finds one remote speaker, the summary is
+        // written exactly as before.
         // NOTE: we deliberately do NOT re-transcribe the echo-reduced audio —
         // that file is mono with the other party spectrally removed, so it
         // would collapse both speakers into one and drop the "Others" side.
+        let detectSpeakers = env.speakerDetectionEnabled && captureResult?.audioFileURL != nil
+        Task {
+            var finalSegments = segments
+            var finalMeeting = meeting
+            if detectSpeakers, await env.diarizationService.diarize(meetingID: meetingID, store: env.meetingStore) {
+                if let saved = try? await env.meetingStore.loadTranscript(for: meetingID) { finalSegments = saved }
+                if let handle = try? await env.meetingStore.openMeeting(id: meetingID) { finalMeeting = handle.meeting }
+            }
+            startSummary(meetingID: meetingID, meeting: finalMeeting, segments: finalSegments, userNotes: userNotes)
+        }
+    }
+
+    private func startSummary(meetingID: UUID, meeting: Meeting, segments: [TranscriptSegment], userNotes: String?) {
         guard !segments.isEmpty else { return }
 
         let modelId = env.activeSummarizationKind == OpenAIEngine.kind

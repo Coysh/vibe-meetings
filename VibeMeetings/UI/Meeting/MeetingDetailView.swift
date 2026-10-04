@@ -119,7 +119,19 @@ struct MeetingDetailView: View {
                                 )
                                 Divider()
                                 HStack {
+                                    speakerDetectionStatus(meeting: handle.meeting)
                                     Spacer()
+                                    if handle.meeting.hasAudio {
+                                        Button {
+                                            Task { await detectSpeakers() }
+                                        } label: {
+                                            Label("Detect speakers…", systemImage: "person.2.wave.2")
+                                        }
+                                        .buttonStyle(.bordered)
+                                        .controlSize(.small)
+                                        .disabled(env.diarizationService.isRunning(for: meetingID))
+                                        .help("Split “Others” into individual speakers using this meeting's audio")
+                                    }
                                     Button {
                                         importTranscriptText = ""
                                         if segments.isEmpty {
@@ -152,6 +164,9 @@ struct MeetingDetailView: View {
         .task(id: meetingID) {
             await load()
         }
+        .onChange(of: env.diarizationService.job(for: meetingID)?.status) { _, status in
+            if case .completed = status { Task { await load() } }
+        }
         .onChange(of: env.activeRecordingController == nil) {
             // When recording stops the controller is nilled out; reload the
             // now-persisted transcript so it replaces the (stale) live view.
@@ -164,8 +179,13 @@ struct MeetingDetailView: View {
                     set: { editableMeeting = $0 }
                 ),
                 knownOrgs: env.configuredOrgs,
-                onSave: { updated in
+                onSave: { edited in
                     Task {
+                        var updated = edited
+                        // Keep speakers found since the editor opened.
+                        if let fresh = try? await env.meetingStore.openMeeting(id: meetingID).meeting {
+                            updated.participants = fresh.participants
+                        }
                         let titleChanged = updated.title != handle?.meeting.title
                         guard await env.attempt("save the meeting details", { try await env.meetingStore.updateMeeting(updated) }) != nil else { return }
                         if titleChanged {
@@ -586,6 +606,48 @@ struct MeetingDetailView: View {
             customPrompt: prompt,
             store: env.meetingStore
         )
+    }
+
+    // MARK: - Speakers
+
+    @ViewBuilder
+    private func speakerDetectionStatus(meeting: Meeting) -> some View {
+        if let job = env.diarizationService.job(for: meetingID) {
+            switch job.status {
+            case .running:
+                HStack(spacing: 6) {
+                    ProgressView().controlSize(.small)
+                    Text("Identifying speakers…")
+                }
+                .font(.caption)
+                .foregroundStyle(.secondary)
+                .padding(.leading, 8)
+            case .completed(let speakers):
+                HStack(spacing: 8) {
+                    Text(speakers > 0
+                         ? "Found \(speakers) speakers. Right-click a name to rename."
+                         : "Only one other person spoke, so there was nothing to split. Right-click “Others” to name them.")
+                    if speakers > 0 && !summary.isEmpty {
+                        Button("Update summary…") { pendingConfirmation = .regenerateSummary }
+                            .buttonStyle(.link)
+                    }
+                }
+                .font(.caption)
+                .foregroundStyle(.secondary)
+                .padding(.leading, 8)
+            case .failed(let message):
+                Label("Couldn't identify speakers: \(message)", systemImage: "exclamationmark.triangle.fill")
+                    .font(.caption)
+                    .foregroundStyle(.orange)
+                    .lineLimit(2)
+                    .padding(.leading, 8)
+            }
+        }
+    }
+
+    private func detectSpeakers() async {
+        await env.diarizationService.diarize(meetingID: meetingID, store: env.meetingStore)
+        await load()
     }
 
     /// Rename a speaker (e.g. "Others") for this meeting only.

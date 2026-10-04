@@ -312,6 +312,11 @@ struct MeetingTriageView: View {
         let labels = labelsText.commaSeparatedItems
         meeting.labels = labels.isEmpty ? nil : labels
 
+        // Don't write back a stale speaker list (speaker detection may have run since).
+        if let fresh = try? await env.meetingStore.openMeeting(id: meeting.id).meeting {
+            meeting.participants = fresh.participants
+        }
+
         // Stay on this meeting if saving fails, so nothing typed is lost.
         guard await env.attempt("save the meeting details", { try await env.meetingStore.updateMeeting(meeting) }) != nil else { return }
 
