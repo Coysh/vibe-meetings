@@ -82,7 +82,8 @@ if [ -f "$CHANGELOG" ]; then
                 if (line ~ /^## \[/) {
                     # Insert the new version section before this line
                     print "## [" version "] - " date
-                    for (i in unreleased) print unreleased[i]
+                    # In order: `for (i in array)` visits keys in hash order and scrambles a long section.
+                    for (i = 1; i <= count; i++) print unreleased[i]
                     print ""
                     print line
                     break
