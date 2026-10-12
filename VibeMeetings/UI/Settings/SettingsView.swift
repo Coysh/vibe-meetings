@@ -5,6 +5,7 @@ import VMCalendar
 import VMCore
 import VMRecording
 import VMSummarization
+import VMTranscription
 
 struct SettingsView: View {
     @Environment(AppEnvironment.self) private var env
@@ -32,6 +33,12 @@ private struct GeneralSettingsView: View {
 
     var body: some View {
         Form {
+            Picker("Appearance", selection: Bindable(env).appearance) {
+                ForEach(AppearanceMode.allCases) { mode in
+                    Text(mode.title).tag(mode)
+                }
+            }
+
             Toggle("Launch at login", isOn: $launchAtLogin)
                 .onChange(of: launchAtLogin) { _, enabled in
                     do {
@@ -194,6 +201,14 @@ private struct RecordingSettingsView: View {
                     .fixedSize(horizontal: false, vertical: true)
             }
 
+            Section("Speakers") {
+                Toggle("Identify individual speakers after each meeting", isOn: $env.speakerDetectionEnabled)
+                Text("On group calls, splits “Others” into Speaker 1, Speaker 2 … so you can see who said what and rename them. Runs on this Mac after the recording stops; the speaker models (about 20 MB) download once from Hugging Face. 1:1 calls are left as they are. For past meetings, use Detect speakers… under a transcript.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+
             Section("Ending a recording") {
                 Toggle("Suggest stopping when a meeting seems to have ended", isOn: Binding(
                     get: { env.meetingEndDetector.autoEndEnabled },
@@ -238,11 +253,16 @@ private struct RecordingSettingsView: View {
             Section {
                 Toggle("Show floating indicator", isOn: $env.showRecordingOverlay)
                 if env.showRecordingOverlay {
+                    Picker("Indicator size", selection: $env.recordingOverlaySize) {
+                        ForEach(OverlaySizeMode.allCases) { mode in
+                            Text(mode.title).tag(mode)
+                        }
+                    }
                     Button("Reset Indicator Position") {
-                        RecordingOverlayController.resetPosition()
+                        env.resetRecordingOverlayPosition()
                     }
                 }
-                Text("A small pill that floats above other apps: “Not recording · Record” during a call, and a timer with Stop while recording. Drag it anywhere.")
+                Text("A small pill that floats above other apps: “Not recording · Record” during a call, and a timer with Stop while recording. Drag it from anywhere — it snaps to screen edges. Compact is just the timer and Stop; Expanded adds the live transcript and level meters, and can be resized. Right-click it to change size.")
                     .font(.caption)
                     .foregroundStyle(.secondary)
 
@@ -282,6 +302,8 @@ private struct EngineSettingsView: View {
     @State private var downloadProgress: Double = 0
     @State private var modelsError: String?
     @State private var needsOpenAIKeyHint = false
+    @State private var claudeStatus: ClaudeCodeCLI.Status?
+    @State private var confirmImproveAll = false
 
     enum OllamaTestResult: Equatable {
         case untested
@@ -295,7 +317,11 @@ private struct EngineSettingsView: View {
                 Picker("Write summaries with", selection: Binding(
                     get: { env.activeSummarizationKind },
                     set: { kind in
-                        if kind == "openai" {
+                        if kind == ClaudeCodeEngine.kind {
+                            needsOpenAIKeyHint = false
+                            env.setClaudeCode()
+                            Task { claudeStatus = await ClaudeCodeCLI.status() }
+                        } else if kind == "openai" {
                             if openAIKey.isEmpty {
                                 // Previously this silently snapped back to Ollama.
                                 needsOpenAIKeyHint = true
@@ -311,15 +337,14 @@ private struct EngineSettingsView: View {
                 )) {
                     Text("Ollama (on this Mac or your network)").tag("ollama")
                     Text("OpenAI (cloud)").tag("openai")
+                    Text("Claude Code (cloud, your Claude account)").tag(ClaudeCodeEngine.kind)
                 }
                 if needsOpenAIKeyHint {
                     Label("Add an OpenAI API key in the OpenAI section below, press Test & Save, then choose OpenAI again.", systemImage: "info.circle")
                         .font(.caption)
                         .foregroundStyle(.orange)
                 }
-                Text(env.activeSummarizationKind == "openai"
-                     ? "Transcripts are sent to OpenAI to write summaries and answer chat questions."
-                     : "Summaries and chat run on your Ollama server; nothing is sent to a cloud service.")
+                Text(summarizerPrivacyNote)
                     .font(.caption)
                     .foregroundStyle(.secondary)
             } header: {
@@ -355,6 +380,8 @@ private struct EngineSettingsView: View {
                     Text(err).font(.caption).foregroundStyle(.red)
                 }
             }
+
+            transcriptAccuracySection
 
             Section {
                 TextField("Endpoint", text: $ollamaURLString, prompt: Text("http://127.0.0.1:11434"))
@@ -414,6 +441,8 @@ private struct EngineSettingsView: View {
                     .foregroundStyle(.secondary)
             }
 
+            claudeCodeSection
+
             Section {
                 SecureField("API Key", text: $openAIKey, prompt: Text("sk-..."))
                     .textFieldStyle(.roundedBorder)
@@ -467,6 +496,170 @@ private struct EngineSettingsView: View {
             await loadModels()
             await loadOllamaModels()
             if !openAIKey.isEmpty { await loadOpenAIModels() }
+            claudeStatus = await ClaudeCodeCLI.status()
+        }
+    }
+
+    // MARK: - Transcript accuracy
+
+    private static let languages: [(code: String, name: String)] = [
+        ("en", "English"), ("auto", "Detect automatically"),
+        ("es", "Spanish"), ("fr", "French"), ("de", "German"), ("it", "Italian"),
+        ("pt", "Portuguese"), ("nl", "Dutch"), ("pl", "Polish"), ("sv", "Swedish"),
+    ]
+
+    private var transcriptAccuracySection: some View {
+        Section {
+            Picker("Language", selection: Bindable(env).transcriptionLanguage) {
+                ForEach(Self.languages, id: \.code) { Text($0.name).tag($0.code) }
+            }
+
+            VStack(alignment: .leading, spacing: 4) {
+                Text("Names and terms")
+                TextEditor(text: Bindable(env).customVocabulary)
+                    .font(.body)
+                    .scrollContentBackground(.hidden)
+                    .padding(6)
+                    .frame(height: 64)
+                    .background(.fill.quaternary, in: RoundedRectangle(cornerRadius: 6))
+                Text("People, clients and jargon, one per line or separated by commas. If the transcript spells one slightly differently (“Teresa” for “Theresa”), it's corrected. Your organisations, and each meeting's attendees and title, are included automatically.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+
+            Toggle("Improve each transcript after the recording ends", isOn: Bindable(env).refineAfterRecording)
+            if env.refineAfterRecording {
+                Picker("Model for improving", selection: Bindable(env).refinementModelId) {
+                    ForEach(ModelCatalog.entries(for: "whisperkit"), id: \.id) { entry in
+                        Text(modelLabel(entry)).tag(entry.id)
+                    }
+                }
+            }
+
+            improveAllRow
+        } header: {
+            Text("Transcript accuracy")
+        } footer: {
+            Text("The live transcript is made while you talk, so it has to keep up with real time and misses words. When the recording ends, the saved audio is transcribed again with a larger model and no time pressure, which usually finds a lot more. It runs in the background, speaker detection and the summary wait for it, and the live transcript is kept so you can restore it. It never runs while you're recording. A meeting can also be improved on demand from its ⋯ menu, and several at once by selecting them in the meeting list and right-clicking.")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+        }
+    }
+
+    @ViewBuilder
+    private var improveAllRow: some View {
+        let service = env.refinementService
+        if let progress = service.bulk {
+            VStack(alignment: .leading, spacing: 4) {
+                ProgressView(value: Double(progress.done), total: Double(max(progress.total, 1)))
+                HStack {
+                    Text("Improving past meetings: \(progress.done) of \(progress.total) — \(progress.current)")
+                        .font(.caption).foregroundStyle(.secondary).lineLimit(1)
+                    Spacer()
+                    Button("Stop") { service.cancelBulk() }.controlSize(.small)
+                }
+            }
+        } else {
+            let count = TranscriptRefinementService.improvableMeetings(in: env.folderTree).count
+            if let summary = service.bulkSummary {
+                HStack {
+                    Text(summary).font(.caption).foregroundStyle(.secondary)
+                    Spacer()
+                    Button("Dismiss") { service.dismissBulkSummary() }.controlSize(.small)
+                }
+            }
+            Button("Improve past meetings…") { confirmImproveAll = true }
+                .disabled(count == 0)
+                .help(count == 0 ? "Every past meeting with a saved recording has already been improved." : "Re-transcribe \(count) past meetings from their recordings")
+                .confirmationDialog(
+                    "Improve \(count) past transcript\(count == 1 ? "" : "s")?",
+                    isPresented: $confirmImproveAll,
+                    titleVisibility: .visible
+                ) {
+                    Button("Improve \(count) meeting\(count == 1 ? "" : "s")") { service.improveAllPastMeetings(env: env) }
+                    Button("Cancel", role: .cancel) {}
+                } message: {
+                    Text("Each meeting is transcribed again from its recording and the transcript replaced; the original is kept so you can restore it.\(env.speakerDetectionEnabled ? " Speakers are identified too." : "") It takes a few minutes per hour of meeting, runs in the background, and pauses while you're recording. Summaries aren't changed — update them from a meeting if you want.")
+                }
+        }
+    }
+
+    private func modelLabel(_ entry: ModelCatalog.Entry) -> String {
+        let size = ByteCountFormatter.string(fromByteCount: entry.sizeBytes, countStyle: .file)
+        return "\(entry.displayName) · \(size)" + (ModelCatalog.isDownloaded(entry) ? "" : " · downloads when first used")
+    }
+
+    // MARK: - Claude Code
+
+    private var summarizerPrivacyNote: String {
+        switch env.activeSummarizationKind {
+        case ClaudeCodeEngine.kind:
+            "Transcripts are sent to Anthropic, through the Claude Code app on this Mac and the account it's signed in with, to write summaries and answer chat questions."
+        case "openai":
+            "Transcripts are sent to OpenAI to write summaries and answer chat questions."
+        default:
+            "Summaries and chat run on your Ollama server; nothing is sent to a cloud service."
+        }
+    }
+
+    private var claudeCodeSection: some View {
+        Section {
+            claudeStatusRow
+
+            Picker("Model", selection: Bindable(env).selectedClaudeModelId) {
+                ForEach(ClaudeCodeEngine.models) { model in
+                    Text(model.displayName).tag(model.id)
+                }
+            }
+
+            Toggle("Let Claude search my meetings to answer chat questions", isOn: Bindable(env).claudeSearchesLibrary)
+        } header: {
+            Text("Claude Code" + (env.activeSummarizationKind == ClaudeCodeEngine.kind ? " · in use" : ""))
+        } footer: {
+            Text("Uses the `claude` command-line tool you already have, signed in with your Claude account, so Vibe Meetings never sees a key. With the switch on, chat lets Claude search and read your meeting files itself, so it can answer across all your meetings. It can only read, and only inside your meetings folder: it can't change files, run commands or browse the web. Those files are sent to Anthropic as it reads them.")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+        }
+    }
+
+    @ViewBuilder
+    private var claudeStatusRow: some View {
+        switch claudeStatus {
+        case nil:
+            HStack(spacing: 8) { ProgressView().controlSize(.small); Text("Checking Claude Code…").foregroundStyle(.secondary) }
+        case .ready(let path, let version, let account)?:
+            VStack(alignment: .leading, spacing: 2) {
+                Label("Signed in with \(account) · Claude Code \(version)", systemImage: "checkmark.circle.fill")
+                    .foregroundStyle(.green)
+                Text(path).font(.caption).foregroundStyle(.secondary).textSelection(.enabled)
+            }
+            claudeRecheckButton
+        case .notInstalled?:
+            Label("Claude Code isn't installed on this Mac.", systemImage: "xmark.circle.fill")
+                .foregroundStyle(.red)
+            HStack {
+                Link("Get Claude Code", destination: URL(string: "https://claude.com/claude-code")!)
+                claudeRecheckButton
+            }
+        case .notSignedIn(let path)?:
+            VStack(alignment: .leading, spacing: 2) {
+                Label("Claude Code is installed but not signed in.", systemImage: "exclamationmark.triangle.fill")
+                    .foregroundStyle(.orange)
+                Text("In Terminal, run `claude auth login`, then check again. (\(path))")
+                    .font(.caption).foregroundStyle(.secondary)
+            }
+            claudeRecheckButton
+        case .failed(let message)?:
+            Label(message, systemImage: "exclamationmark.triangle.fill").foregroundStyle(.orange)
+            claudeRecheckButton
+        }
+    }
+
+    private var claudeRecheckButton: some View {
+        Button("Check again") {
+            claudeStatus = nil
+            ClaudeCodeCLI.forgetLocation()
+            Task { claudeStatus = await ClaudeCodeCLI.status() }
         }
     }
 
@@ -796,12 +989,9 @@ private struct NotificationSettingsView: View {
 
 private struct PromptSettingsView: View {
     @Environment(AppEnvironment.self) private var env
-    @State private var promptText: String = ""
     @State private var chatPromptText: String = ""
     @State private var showingDefault = false
     @State private var selectedTab = 0
-
-    private static let defaultPrompt = PromptLoader.fallbackPrompt
 
     private static let defaultChatPrompt: String = {
         if let url = Bundle.main.url(forResource: "chat.system", withExtension: "md", subdirectory: "Prompts"),
@@ -827,54 +1017,17 @@ private struct PromptSettingsView: View {
         }
         .padding()
         .onAppear {
-            promptText = env.customSystemPrompt
             chatPromptText = UserDefaults.standard.string(forKey: "VibeMeetings.ChatCustomPrompt") ?? ""
         }
     }
 
     @ViewBuilder
     private var summaryPromptEditor: some View {
-        Text("Override the default instructions sent to the LLM when generating summaries. Leave blank to use the built-in prompt.")
+        Text("The instructions sent to the LLM when writing summaries. The same prompt is on the Templates page, under Summary.")
             .font(.caption)
             .foregroundStyle(.secondary)
 
-        TextEditor(text: $promptText)
-            .font(.system(.body, design: .monospaced))
-            .scrollContentBackground(.hidden)
-            .padding(8)
-            .background(Color(nsColor: .textBackgroundColor))
-            .clipShape(RoundedRectangle(cornerRadius: 6))
-            .frame(minHeight: 200)
-
-        HStack {
-            Button("Reset to Default") {
-                promptText = ""
-                saveSummaryPrompt()
-            }
-            .disabled(promptText.isEmpty)
-
-            Button(showingDefault ? "Hide Default" : "Show Default") {
-                showingDefault.toggle()
-            }
-
-            Spacer()
-
-            Button("Save") { saveSummaryPrompt() }
-                .buttonStyle(.borderedProminent)
-                .disabled(promptText == env.customSystemPrompt)
-        }
-
-        if showingDefault {
-            GroupBox("Built-in summary prompt") {
-                ScrollView {
-                    Text(Self.defaultPrompt)
-                        .font(.system(.caption, design: .monospaced))
-                        .textSelection(.enabled)
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                }
-                .frame(maxHeight: 120)
-            }
-        }
+        SummaryPromptEditor()
     }
 
     @ViewBuilder
@@ -919,16 +1072,6 @@ private struct PromptSettingsView: View {
                 }
                 .frame(maxHeight: 120)
             }
-        }
-    }
-
-    private func saveSummaryPrompt() {
-        env.customSystemPrompt = promptText
-        let trimmed = promptText.trimmingCharacters(in: .whitespacesAndNewlines)
-        if trimmed.isEmpty {
-            UserDefaults.standard.removeObject(forKey: "VibeMeetings.CustomSystemPrompt")
-        } else {
-            UserDefaults.standard.set(promptText, forKey: "VibeMeetings.CustomSystemPrompt")
         }
     }
 

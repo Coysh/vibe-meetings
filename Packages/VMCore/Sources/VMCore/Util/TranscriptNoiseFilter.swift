@@ -59,6 +59,21 @@ public enum TranscriptNoiseFilter {
         return false
     }
 
+    /// Removes Whisper's sound annotations from *inside* a line — "[silence]", "[POP]", "[ Music ]",
+    /// "(keyboard clicking)", "♪" — which `isNoise` only catches when they're the whole line. People don't
+    /// speak in square brackets, so those always go; round brackets only when they hold a known noise word.
+    public static func stripNoiseMarkers(_ text: String) -> String {
+        var result = text.replacing(/\[[^\]\n]{0,32}\]/, with: " ")
+        result = result.replacing(/\(([^)\n]{1,32})\)/) { match in
+            let inside = String(match.output.1).lowercased().trimmingCharacters(in: .whitespaces)
+            return bracketNoise.contains(inside) ? " " : String(match.output.0)
+        }
+        result = result.replacing("♪", with: " ")
+        // Tidy the gaps the removals leave, including a space before punctuation.
+        result = result.replacing(/\s+/, with: " ").replacing(/\s+([,.!?;:])/, with: { String($0.output.1) })
+        return result.trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
     private static let bracketNoise: Set<String> = [
         "silence", "blank audio", "blank_audio", "no audio", "noise",
         "background noise", "static", "light wind", "wind", "bubbling",

@@ -12,10 +12,18 @@ import VMCore
 public final class SegmentMerger: @unchecked Sendable {
     private var segments: [TranscriptSegment] = []
     private var echoConfig: EchoDedup.Config
+    private var vocabulary: VocabularyCorrector?
     private let lock = NSLock()
 
     public init(echoConfig: EchoDedup.Config = .default) {
         self.echoConfig = echoConfig
+    }
+
+    /// Names and terms to respell wherever the model gets them slightly wrong. Applied to everything ingested
+    /// from here on.
+    public func setVocabulary(_ corrector: VocabularyCorrector?) {
+        lock.lock(); defer { lock.unlock() }
+        vocabulary = corrector?.isEmpty == true ? nil : corrector
     }
 
     /// Switch the echo-suppression strictness mid-recording (e.g. to
@@ -31,11 +39,19 @@ public final class SegmentMerger: @unchecked Sendable {
     /// Segments from the same speaker whose time range overlaps with the
     /// incoming segment are replaced (the newer transcription is assumed
     /// to be more accurate because Whisper has more context).
-    public func ingest(_ seg: TranscriptSegment) {
+    public func ingest(_ incoming: TranscriptSegment) {
         lock.lock(); defer { lock.unlock() }
 
-        let text = seg.text.trimmingCharacters(in: .whitespacesAndNewlines)
+        // A segment sent again with the same id replaces its earlier version — that's how the live
+        // "in progress" text is rewritten as it firms up — and if the new one is empty it just goes away.
+        if let existing = segments.firstIndex(where: { $0.id == incoming.id }) {
+            segments.remove(at: existing)
+        }
+
+        var seg = incoming
+        let text = TranscriptNoiseFilter.stripNoiseMarkers(incoming.text)
         guard !text.isEmpty else { return }
+        seg.text = vocabulary?.correct(text) ?? text
 
         // Drop obvious noise / hallucinations at the door so they never reach
         // the live view or the merge state.

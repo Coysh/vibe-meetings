@@ -172,10 +172,10 @@ struct TranscriptView: View {
                     }
                     .buttonStyle(.bordered)
                     .controlSize(.small)
-                    .padding(.trailing)
                     .padding(.vertical, 6)
                 }
-                Divider()
+                .readableWidth()
+                .padding(.horizontal, Tokens.Space.xl)
             }
 
             ScrollViewReader { proxy in
@@ -201,8 +201,9 @@ struct TranscriptView: View {
                             }
                         }
                     }
-                    .padding(.horizontal)
                     .padding(.vertical, 12)
+                    .readableWidth()
+                    .padding(.horizontal, Tokens.Space.xl)
                     .textSelection(.enabled)
                 }
                 // Track whether the reader is at the bottom: new live captions follow
@@ -272,6 +273,13 @@ struct TranscriptView: View {
             set: { if !$0 { renameSpeakerID = nil } }
         )) {
             TextField("Name", text: $renameText)
+            // One-click names from the calendar invite (people not already used).
+            ForEach(renameSuggestions, id: \.self) { name in
+                Button(name) {
+                    if let id = renameSpeakerID { onRenameSpeaker?(id, name) }
+                    renameSpeakerID = nil
+                }
+            }
             Button("Cancel", role: .cancel) { renameSpeakerID = nil }
             Button("Rename") {
                 let name = renameText.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -330,11 +338,13 @@ struct TranscriptView: View {
     @ViewBuilder
     private func groupHeader(_ group: SpeakerGroup) -> some View {
         HStack(spacing: 8) {
-            Text(nameByID[group.speakerId] ?? group.speakerId.capitalized)
-                .font(.subheadline.bold())
-                .foregroundStyle(Self.speakerColor(group.channel))
+            Circle()
+                .fill(Self.speakerColor(speakerId: group.speakerId, channel: group.channel))
+                .frame(width: 8, height: 8)
+                .accessibilityHidden(true)
+            speakerName(group)
             Text(group.start.formattedTimestamp)
-                .font(.caption2.monospacedDigit())
+                .font(.caption.monospacedDigit())
                 .foregroundStyle(.secondary)
         }
         .contextMenu {
@@ -346,6 +356,43 @@ struct TranscriptView: View {
             }
         }
         .accessibilityElement(children: .combine)
+    }
+
+    /// The speaker's name — with a dropdown to rename them, where renaming is allowed.
+    @ViewBuilder
+    private func speakerName(_ group: SpeakerGroup) -> some View {
+        let name = nameByID[group.speakerId] ?? group.speakerId.capitalized
+        if onRenameSpeaker != nil {
+            Menu {
+                Button("Rename “\(name)”…") {
+                    renameText = nameByID[group.speakerId] ?? ""
+                    renameSpeakerID = group.speakerId
+                }
+            } label: {
+                HStack(spacing: 3) {
+                    Text(name).font(.subheadline.weight(.semibold))
+                    Image(systemName: "chevron.down")
+                        .font(.caption2.weight(.bold))
+                        .foregroundStyle(.secondary)
+                }
+            }
+            .menuStyle(.button)
+            .buttonStyle(.plain)
+            .menuIndicator(.hidden)
+            .fixedSize()
+            .help("Rename this speaker")
+        } else {
+            Text(name).font(.subheadline.weight(.semibold))
+        }
+    }
+
+    /// Attendees from the calendar invite who aren't already a named speaker (max 3).
+    private var renameSuggestions: [String] {
+        let used = Set(participants.map { $0.displayName.lowercased() })
+        return (meeting?.attendees ?? [])
+            .filter { !$0.isEmpty && $0.lowercased() != "you" && !used.contains($0.lowercased()) }
+            .prefix(3)
+            .map { $0 }
     }
 
     private func stepMatch(_ delta: Int) {
@@ -462,11 +509,18 @@ struct TranscriptView: View {
         }
     }
 
-    static func speakerColor(_ channel: AudioChannel) -> Color {
+    /// You are blue; each remote speaker gets their own colour ("others" stays
+    /// purple; "others-N" cycle through a palette), so a group call reads at a glance.
+    static func speakerColor(speakerId: String, channel: AudioChannel) -> Color {
         switch channel {
         case .mic: return .blue
-        case .system: return .purple
         case .mixed: return .secondary
+        case .system:
+            let palette: [Color] = [.purple, .teal, .orange, .pink, .indigo, .brown, .mint]
+            guard speakerId.hasPrefix("others-"), let n = Int(speakerId.dropFirst("others-".count)), n > 0 else {
+                return .purple
+            }
+            return palette[(n - 1) % palette.count]
         }
     }
 

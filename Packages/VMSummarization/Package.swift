@@ -11,7 +11,9 @@ let package = Package(
         .package(path: "../VMCore")
     ],
     targets: [
-        .target(name: "VMSummarization", dependencies: ["VMCore"])
+        .target(name: "VMSummarization", dependencies: ["VMCore"]),
+        // Developer tool (not linked into the app): exercises the Claude Code engine from Terminal.
+        .executableTarget(name: "vm-claude-check", dependencies: ["VMSummarization", "VMCore"]),
     ],
     swiftLanguageModes: [.v6]
 )

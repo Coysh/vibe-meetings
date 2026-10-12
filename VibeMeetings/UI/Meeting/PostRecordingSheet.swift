@@ -185,6 +185,12 @@ struct PostRecordingSheet: View {
         let labels = labelsText.commaSeparatedItems
         m.labels = labels.isEmpty ? nil : labels
 
+        // Speaker detection may have added speakers since this sheet loaded;
+        // keep them rather than writing back the stale list.
+        if let fresh = try? await env.meetingStore.openMeeting(id: m.id).meeting {
+            m.participants = fresh.participants
+        }
+
         // If the details can't be saved, stay open so nothing is lost.
         guard await env.attempt("save the meeting details", { try await env.meetingStore.updateMeeting(m) }) != nil else { return }
 

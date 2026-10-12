@@ -33,15 +33,12 @@ struct MicActiveBanner: View {
             Spacer()
 
             Button("Start recording", action: onStart)
-                .buttonStyle(.borderedProminent)
+                .buttonStyle(.capsule(.primary))
             // "Dismiss" here silences this call for good, so say so.
             Button("Not a meeting", action: onDismiss)
-                .buttonStyle(.bordered)
+                .buttonStyle(.capsule(.secondary))
                 .help("Stop reminding me about this call")
         }
-        .padding(.horizontal, 14)
-        .padding(.vertical, 10)
-        .background(.orange.opacity(0.12))
-        .overlay(alignment: .bottom) { Divider() }
+        .bannerCard(tint: .orange)
     }
 }

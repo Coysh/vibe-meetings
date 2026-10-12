@@ -16,6 +16,8 @@ struct VibeMeetingsApp: App {
                 if let env = appEnv {
                     RootView()
                         .environment(env)
+                        .tint(Tokens.accent)
+                        .preferredColorScheme(env.appearance.colorScheme)
                 } else {
                     Text("Failed to start. See log.")
                         .frame(minWidth: 600, minHeight: 400)
@@ -69,6 +71,8 @@ struct VibeMeetingsApp: App {
             if let env = appEnv {
                 SettingsView()
                     .environment(env)
+                    .tint(Tokens.accent)
+                    .preferredColorScheme(env.appearance.colorScheme)
             }
         }
         .windowResizability(.contentMinSize)
