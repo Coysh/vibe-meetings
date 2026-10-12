@@ -6,14 +6,23 @@ Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 versioned with [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
-### Added
+
+## [1.9.0] - 2026-10-12
+- The sidebar lists only your newest meetings (under Recent); the full lists are in All meetings, a folder, or Home. Multi-select with ⌘/⇧-click and press Delete to remove several
 - **A much more accurate transcript.** Comparing transcripts of the same recordings, the live transcript was missing about 40–60% of what was said. Two changes fix most of that:
+- The summary is written after the transcript has been improved, and from the live transcript if that fails. While it waits, the Summary tab says so, with "Write it now from the live transcript". Improving a past meeting's transcript by hand now rewrites its summary too
   - *Improve transcript after the recording.* When a recording ends, the saved audio is transcribed again with a larger model (large-v3 turbo, about 600 MB, downloaded on first use) and no time pressure, then speaker detection and the summary run on the better text. It runs in the background, never while you're recording, and shows its progress on the meeting. The live transcript is kept: ⋯ → Restore live transcript. Turn it off, or pick another model, in Settings → Engines → Transcript accuracy. **Improve transcript…** in a meeting's ⋯ menu does it on demand, and **Improve past meetings…** in Settings does it for everything you've already recorded
+- Resume Recording is now a button at the bottom of a finished meeting (also in the ⋯ menu)
   - *A new live transcriber.* It used to re-read the last 30 seconds every 5 seconds and let each pass overwrite the one before, which clipped the first words of every window; windows that were mostly silence made Whisper write "[silence]" and skip the speech. It now keeps text once it has settled, starts each pass at a sentence boundary, never sends silence to the model, and brings quiet speech up to a level Whisper reads well. On two of your recordings (4-minute samples, compared with the offline pass) the other side of the call went from 105 to 252 of 265 words in one, and from 87 to 566 of 577 in the other, and it needs less than half the processing time of the old one
+- Notification banners (meeting starting, call detected, meeting ended) are now cards
   - "[silence]", "[POP]" and "[END]" no longer end up inside transcript lines, and the last few seconds of a recording are no longer cut off when you press Stop
+
   - **Names and terms** (Settings → Engines → Transcript accuracy): if the transcript spells a name slightly differently from your list ("Teresa" for "Theresa"), it's corrected. Your organisations, and each meeting's attendees and title, are included automatically. (Giving Whisper the names up front was tried first: it made transcripts shorter and slower, and it breaks the turbo models, so it isn't used.)
+### Fixed
   - Settings → Engines → Transcript accuracy also has the spoken language (English by default; "detect automatically" picks it once per recording rather than on every short window). Two command-line tools, `vm-transcribe-eval` and `vm-claude-check`, measure transcript accuracy and try the Claude engine
+- "Couldn't improve the transcript (… avfaudio error 2003334207)" on a recording that was renamed or filed while it was being improved: the audio is now opened once, and the meeting's folder is looked up again whenever something is saved to it, template write-ups included
 - **Individual speakers.** After a group meeting, the other side of the call is split into Speaker 1, Speaker 2 and so on, on this Mac, before the summary is written, so summaries can say who said what. Each speaker gets a colour in the transcript, and renaming one suggests the meeting's calendar attendees. 1:1s are left as they are, and **Detect speakers…** does it for a meeting you've already recorded. On by default; turn it off in Settings → Recording
+- If another recording starts while a transcript is being improved, the meeting is written up from the live transcript straight away (and its summary updated once the improved one is ready), instead of waiting for the new recording to end
 - **Claude Code as a summary and chat engine.** Choose "Claude Code" in Settings → Engines to write summaries and templates, and answer chat questions, with the `claude` command-line tool you already have, signed in with your Claude account (Vibe Meetings never sees a key). In chat, Claude can search and read your meeting files itself, so questions across many meetings ("what did we decide about the budget this quarter?") work properly; you see what it's searching and reading, and the meetings it used appear under "Based on". It's read-only and limited to your meetings folder: it can't change files, run commands or browse the web. Turn the file search off in Settings if you'd rather it only gets a few matched summaries. Transcripts are sent to Anthropic when this engine is on. Includes a `vm-claude-check` command-line tool for trying the engine
 - **Floating indicator you can move and size.** Drag it from anywhere (not just the dot and timer), and it snaps to screen edges and corners. Three sizes: Compact (timer and Stop), Standard, and Expanded, a card with the live transcript and both level meters that you can resize by its corner. Right-click it to change size, reset its position or hide it; the size is also in Settings → Recording and the menu bar. Each size remembers its own position
 - **Default templates.** Mark any template as a default (Templates page → ⋯ → Make Default, or in its editor) and it's written for every new recording, one after another once the summary is done, each as its own tab. Until then its tab says it's waiting
@@ -26,15 +35,9 @@ versioned with [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - Appearance setting (Settings → General): dark by default, or light, or follow the system. The app's accent is now violet whatever the system accent is
 - A redesigned main window: a narrow sidebar (Home, All meetings, your folders), a date-grouped meeting list ("Today", "Yesterday", "16 June 2026") with search, and a meeting page with a back button, chips for its folder, date, duration and people, and underlined tabs. Recording controls float at the bottom of the window instead of a bar across the top
 
-### Changed
-- The sidebar lists only your newest meetings (under Recent); the full lists are in All meetings, a folder, or Home. Multi-select with ⌘/⇧-click and press Delete to remove several
-- The summary is written after the transcript has been improved, and from the live transcript if that fails. While it waits, the Summary tab says so, with "Write it now from the live transcript". Improving a past meeting's transcript by hand now rewrites its summary too
-- Resume Recording is now a button at the bottom of a finished meeting (also in the ⋯ menu)
-- Notification banners (meeting starting, call detected, meeting ended) are now cards
 
-### Fixed
-- "Couldn't improve the transcript (… avfaudio error 2003334207)" on a recording that was renamed or filed while it was being improved: the audio is now opened once, and the meeting's folder is looked up again whenever something is saved to it, template write-ups included
-- If another recording starts while a transcript is being improved, the meeting is written up from the live transcript straight away (and its summary updated once the improved one is ready), instead of waiting for the new recording to end
+### Changed
+### Added
 
 ## [1.8.0] - 2026-10-03
 - Resuming a meeting no longer deletes its audio: the earlier audio is kept as a backup file, and you are asked first
@@ -247,8 +250,9 @@ versioned with [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - Microphone device selection in Settings
 - Resume recording for existing meetings
 
-[Unreleased]: https://github.com/Coysh/vibe-meetings/compare/v1.8.0...HEAD
-[1.8.0]: https://github.com/Coysh/vibe-meetings/compare/v1.7.2...v1.8.0
+[Unreleased]: https://github.com/Coysh/vibe-meetings/compare/v1.9.0...HEAD
+[1.9.0]: https://github.com/Coysh/vibe-meetings/compare/v1.8.0...v1.9.0
+[1.8.0]: https://github.com/Coysh/vibe-meetings/compare/v1.7.3...v1.8.0
 [1.7.3]: https://github.com/Coysh/vibe-meetings/compare/v1.7.0...v1.7.3
 [1.7.2]: https://github.com/Coysh/vibe-meetings/compare/v1.6.6...v1.7.2
 [1.7.0]: https://github.com/Coysh/vibe-meetings/compare/v1.6.5...v1.7.0
