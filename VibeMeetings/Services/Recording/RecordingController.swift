@@ -253,11 +253,13 @@ final class RecordingController {
 
         // NOTE: these tasks capture `self` strongly so the controller stays
         // alive while recording; the cycle is broken in stop().
+        let options = env.transcriptionOptions(for: meetingHandle?.meeting)
+        merger.setVocabulary(VocabularyCorrector(terms: env.vocabularyTerms(for: meetingHandle?.meeting)))
         let micStream = env.activeTranscriptionEngine.transcribeStream(
-            input: coordinator.micPCM, channel: .mic, speakerId: Speaker.you.id, options: .default
+            input: coordinator.micPCM, channel: .mic, speakerId: Speaker.you.id, options: options
         )
         let sysStream = env.activeTranscriptionEngine.transcribeStream(
-            input: coordinator.systemPCM, channel: .system, speakerId: Speaker.others.id, options: .default
+            input: coordinator.systemPCM, channel: .system, speakerId: Speaker.others.id, options: options
         )
         streamTasks.append(Task {
             do { for try await seg in micStream { self.ingest(seg) } }
@@ -327,6 +329,15 @@ final class RecordingController {
         defer { isFinishing = false }
         let result = try? await coordinator.stop()
 
+        // Stopping the capture ends the audio streams, and the transcribers then decode what's left (the
+        // last few seconds) and settle it. Give them a moment to finish rather than cutting them off.
+        let transcribers = streamTasks
+        await withTaskGroup(of: Void.self) { group in
+            group.addTask { for task in transcribers { await task.value } }
+            group.addTask { try? await Task.sleep(for: .seconds(8)) }
+            await group.next()
+            group.cancelAll()
+        }
         for t in streamTasks { t.cancel() }
         streamTasks.removeAll()
         clockTask?.cancel(); clockTask = nil

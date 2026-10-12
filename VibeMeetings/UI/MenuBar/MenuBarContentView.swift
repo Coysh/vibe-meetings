@@ -77,6 +77,13 @@ struct MenuBarContentView: View {
         }
         Button("Open Vibe Meetings") { env.presenter.show() }
         Toggle("Show Floating Indicator", isOn: $env.showRecordingOverlay)
+        if env.showRecordingOverlay {
+            Picker("Floating Indicator Size", selection: $env.recordingOverlaySize) {
+                ForEach(OverlaySizeMode.allCases) { mode in
+                    Text(mode.title).tag(mode)
+                }
+            }
+        }
         SettingsLink { Text("Settings…") }
 
         Divider()

@@ -22,6 +22,8 @@ final class AppEnvironment {
     let calendarService: any CalendarService
     let bannerCoordinator: BannerCoordinator
     let summaryService = SummaryGenerationService()
+    let summaryTemplates = SummaryTemplateStore()
+    let refinementService = TranscriptRefinementService()
     let diarizationService = SpeakerDiarizationService()
     let updateChecker = UpdateChecker()
     let sparkleUpdater = SparkleUpdater()
@@ -81,10 +83,81 @@ final class AppEnvironment {
     /// Current folder tree, kept in sync with `meetingStore`. Owned here so
     /// views can read it without subscribing to the async stream themselves,
     /// and so that a refresh after folder creation lands before sheet dismissal.
-    var folderTree: FolderNode?
+    var folderTree: FolderNode? {
+        didSet { refinementService.syncImproved(from: folderTree) }
+    }
 
-    /// Which summarization backend is active: "ollama" or "openai".
+    /// Which summarization backend is active: "ollama", "openai" or "claude-code".
     var activeSummarizationKind: String
+
+    /// The language meetings are spoken in: an ISO code ("en"), or "auto" to detect it.
+    var transcriptionLanguage: String {
+        didSet { UserDefaults.standard.set(transcriptionLanguage, forKey: Self.languageKey) }
+    }
+
+    /// Names and terms Whisper should spell this way (one per line, or comma-separated). Combined with the
+    /// organisations in Settings and each meeting's attendees and title.
+    var customVocabulary: String {
+        didSet { UserDefaults.standard.set(customVocabulary, forKey: Self.vocabularyKey) }
+    }
+
+    /// After each recording, transcribe the saved audio again with a larger model and use that.
+    var refineAfterRecording: Bool {
+        didSet { UserDefaults.standard.set(refineAfterRecording, forKey: Self.refineAfterKey) }
+    }
+
+    /// The model for that pass (any Whisper model in the catalog).
+    var refinementModelId: String {
+        didSet { UserDefaults.standard.set(refinementModelId, forKey: Self.refineModelKey) }
+    }
+
+    /// How to transcribe `meeting`. (Names and terms aren't given to Whisper as a prompt: measured on real
+    /// recordings that dropped sentences and slowed it down, and turbo models fail on it. They're applied to
+    /// the finished text instead — see `vocabularyTerms` and `VocabularyCorrector`.)
+    func transcriptionOptions(for meeting: Meeting?, commitStreaming: Bool = true) -> TranscriptionOptions {
+        TranscriptionOptions(
+            language: transcriptionLanguage == "auto" ? nil : transcriptionLanguage,
+            enableWordTimestamps: false,
+            commitStreaming: commitStreaming
+        )
+    }
+
+    /// The names and terms to spell correctly in `meeting`'s transcript: yours, your organisations, the
+    /// meeting's attendees and its title.
+    func vocabularyTerms(for meeting: Meeting?) -> [String] {
+        var terms = customVocabulary.split(whereSeparator: { $0 == "\n" || $0 == "," }).map(String.init)
+        terms += configuredOrgs
+        if let meeting {
+            terms += meeting.attendees ?? []
+            if let org = meeting.org { terms.append(org) }
+            // "Recording 2026-06-01 17:43" says nothing; a real title often names the project or client.
+            if !meeting.title.hasPrefix("Recording ") { terms.append(meeting.title) }
+        }
+        var seen = Set<String>()
+        return terms
+            .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+            .filter { !$0.isEmpty && $0.lowercased() != "you" && seen.insert($0.lowercased()).inserted }
+    }
+
+    /// Which Claude model the Claude Code CLI uses (an alias: sonnet, opus, fable, haiku).
+    var selectedClaudeModelId: String {
+        didSet { UserDefaults.standard.set(selectedClaudeModelId, forKey: Self.claudeModelKey) }
+    }
+
+    /// Let Claude Code search and read the meeting files itself when answering chat questions
+    /// (read-only, limited to the meetings folder), instead of being handed a few matched summaries.
+    var claudeSearchesLibrary: Bool {
+        didSet { UserDefaults.standard.set(claudeSearchesLibrary, forKey: Self.claudeSearchKey) }
+    }
+
+    /// The model id for whichever engine writes summaries and answers chat.
+    var summarizationModelId: String {
+        switch activeSummarizationKind {
+        case OpenAIEngine.kind: selectedOpenAIModelId
+        case ClaudeCodeEngine.kind: selectedClaudeModelId
+        default: selectedOllamaModelId
+        }
+    }
 
     /// OpenAI API key (persisted in UserDefaults; empty = not configured).
     var openAIApiKey: String
@@ -93,8 +166,43 @@ final class AppEnvironment {
     var selectedOpenAIModelId: String
 
     /// User-editable system prompt override for summarization.
-    /// When non-empty, replaces the bundled prompt sent to the LLM.
-    var customSystemPrompt: String
+    /// When non-empty, replaces the bundled prompt sent to the LLM. Saved as it's set, so every screen
+    /// that edits it (Templates, Settings) stays in step.
+    var customSystemPrompt: String {
+        didSet {
+            if customSystemPrompt.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                UserDefaults.standard.removeObject(forKey: Self.customPromptKey)
+            } else {
+                UserDefaults.standard.set(customSystemPrompt, forKey: Self.customPromptKey)
+            }
+        }
+    }
+
+    /// The prompt summaries are written with when the user hasn't written their own (the bundled file).
+    static let defaultSummaryPrompt = PromptLoader.systemPrompt(style: .standard, bundle: .main)
+
+    /// The user's own summary prompt to hand to the engine, or nil to use the built-in one.
+    var summaryPromptOverride: String? {
+        customSystemPrompt.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? nil : customSystemPrompt
+    }
+
+    /// What summaries are actually written with.
+    var effectiveSummaryPrompt: String { summaryPromptOverride ?? Self.defaultSummaryPrompt }
+
+    var summaryPromptIsCustomised: Bool { summaryPromptOverride != nil }
+
+    /// Save the summary prompt. Text that matches the built-in prompt clears the override instead, so later
+    /// improvements to the built-in prompt still reach the user.
+    func setSummaryPrompt(_ text: String) {
+        customSystemPrompt = Self.isDefaultSummaryPrompt(text) ? "" : text
+    }
+
+    static func isDefaultSummaryPrompt(_ text: String) -> Bool {
+        func normalised(_ s: String) -> String {
+            s.replacingOccurrences(of: "\r\n", with: "\n").trimmingCharacters(in: .whitespacesAndNewlines)
+        }
+        return normalised(text) == normalised(defaultSummaryPrompt)
+    }
 
     /// User-configured organizations shown in the org picker.
     var configuredOrgs: [String]
@@ -118,6 +226,14 @@ final class AppEnvironment {
     private static let notifyAtEventStartKey = "VibeMeetings.Notify.AtEventStart"
     private static let detectBrowserCallsKey = "VibeMeetings.Detection.BrowserCalls"
     private static let showOverlayKey = "VibeMeetings.Overlay.Enabled"
+    private static let overlaySizeKey = "VibeMeetings.Overlay.SizeMode"
+    private static let appearanceKey = "VibeMeetings.Appearance"
+    private static let languageKey = "VibeMeetings.Transcription.Language"
+    private static let vocabularyKey = "VibeMeetings.Transcription.Vocabulary"
+    private static let refineAfterKey = "VibeMeetings.Transcription.RefineAfterRecording"
+    private static let refineModelKey = "VibeMeetings.Transcription.RefinementModelId"
+    private static let claudeModelKey = "VibeMeetings.Claude.ModelId"
+    private static let claudeSearchKey = "VibeMeetings.Claude.SearchLibrary"
     private static let onboardingKey = "VibeMeetings.Onboarding.Completed"
     private static let speakerDetectionKey = "VibeMeetings.Speakers.DetectAfterMeeting"
     private static let echoCancellationKey = "VibeMeetings.Audio.EchoCancellation"
@@ -209,6 +325,21 @@ final class AppEnvironment {
         didSet { UserDefaults.standard.set(showRecordingOverlay, forKey: Self.showOverlayKey) }
     }
 
+    /// Light, dark or system. Dark unless the user chooses otherwise.
+    var appearance: AppearanceMode {
+        didSet { UserDefaults.standard.set(appearance.rawValue, forKey: Self.appearanceKey) }
+    }
+
+    /// How big the floating indicator is while recording (see `overlayLayout`).
+    var recordingOverlaySize: OverlaySizeMode {
+        didSet { UserDefaults.standard.set(recordingOverlaySize.rawValue, forKey: Self.overlaySizeKey) }
+    }
+
+    /// Forget the dragged position; the indicator returns to top-centre now.
+    func resetRecordingOverlayPosition() {
+        overlay?.resetPosition()
+    }
+
     init() throws {
         let defaults = UserDefaults.standard
         let rootKey = "VibeMeetings.RootURL.bookmark"
@@ -262,6 +393,12 @@ final class AppEnvironment {
         let storedOpenAIModel = defaults.string(forKey: Self.openAIModelKey) ?? "gpt-4o-mini"
         let storedSummKind = defaults.string(forKey: Self.summEngineKey) ?? OllamaEngine.kind
 
+        self.transcriptionLanguage = defaults.string(forKey: Self.languageKey) ?? "en"
+        self.customVocabulary = defaults.string(forKey: Self.vocabularyKey) ?? ""
+        self.refineAfterRecording = defaults.object(forKey: Self.refineAfterKey) as? Bool ?? true
+        self.refinementModelId = defaults.string(forKey: Self.refineModelKey) ?? "whisper-large-v3-turbo"
+        self.selectedClaudeModelId = defaults.string(forKey: Self.claudeModelKey) ?? ClaudeCodeEngine.defaultModelId
+        self.claudeSearchesLibrary = defaults.object(forKey: Self.claudeSearchKey) as? Bool ?? true
         self.openAIApiKey = storedOpenAIKey
         self.selectedOpenAIModelId = storedOpenAIModel
         self.customSystemPrompt = defaults.string(forKey: Self.customPromptKey) ?? ""
@@ -276,6 +413,8 @@ final class AppEnvironment {
         self.notifyAtEventStart = defaults.object(forKey: Self.notifyAtEventStartKey) as? Bool ?? true
         self.detectBrowserCalls = defaults.object(forKey: Self.detectBrowserCallsKey) as? Bool ?? true
         self.showRecordingOverlay = defaults.object(forKey: Self.showOverlayKey) as? Bool ?? true
+        self.appearance = defaults.string(forKey: Self.appearanceKey).flatMap(AppearanceMode.init(rawValue:)) ?? .dark
+        self.recordingOverlaySize = defaults.string(forKey: Self.overlaySizeKey).flatMap(OverlaySizeMode.init(rawValue:)) ?? .standard
         if let stored = defaults.object(forKey: Self.onboardingKey) as? Bool {
             self.hasCompletedOnboarding = stored
         } else {
@@ -288,7 +427,10 @@ final class AppEnvironment {
         self.echoCancellationEnabled = defaults.object(forKey: Self.echoCancellationKey) as? Bool ?? true
         self.saveEchoCancelledMic = defaults.object(forKey: Self.saveEchoCancelledMicKey) as? Bool ?? false
 
-        if storedSummKind == OpenAIEngine.kind && !storedOpenAIKey.isEmpty {
+        if storedSummKind == ClaudeCodeEngine.kind {
+            self.summarizationEngine = ClaudeCodeEngine(promptBundle: .main)
+            self.activeSummarizationKind = ClaudeCodeEngine.kind
+        } else if storedSummKind == OpenAIEngine.kind && !storedOpenAIKey.isEmpty {
             self.summarizationEngine = OpenAIEngine(apiKey: storedOpenAIKey, promptBundle: .main)
             self.activeSummarizationKind = OpenAIEngine.kind
         } else {
@@ -428,6 +570,14 @@ final class AppEnvironment {
         UserDefaults.standard.set(modelId, forKey: Self.openAIModelKey)
         UserDefaults.standard.set(OpenAIEngine.kind, forKey: Self.summEngineKey)
         self.summarizationEngine = OpenAIEngine(apiKey: apiKey, promptBundle: .main)
+    }
+
+    /// Switch to the Claude Code CLI for summaries, templates and chat.
+    func setClaudeCode(modelId: String? = nil) {
+        if let modelId { self.selectedClaudeModelId = modelId }
+        self.activeSummarizationKind = ClaudeCodeEngine.kind
+        UserDefaults.standard.set(ClaudeCodeEngine.kind, forKey: Self.summEngineKey)
+        self.summarizationEngine = ClaudeCodeEngine(promptBundle: .main)
     }
 
     /// Switch back to Ollama summarization.

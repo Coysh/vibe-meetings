@@ -43,6 +43,26 @@ public enum ModelCatalog {
             sourceURL: URL(string: "https://huggingface.co/argmaxinc/whisperkit-coreml/resolve/main/openai_whisper-medium")!,
             sha256: nil
         ),
+        // large-v3 with a pruned decoder ("turbo"): close to large-v3's accuracy at a fraction of the
+        // size and time. The 632 MB build is Argmax's compressed conversion.
+        Entry(
+            id: "whisper-large-v3-turbo",
+            displayName: "large-v3 turbo",
+            sizeBytes: 632_000_000,
+            recommended: false,
+            engineKind: "whisperkit",
+            sourceURL: URL(string: "https://huggingface.co/argmaxinc/whisperkit-coreml/resolve/main/openai_whisper-large-v3-v20240930_turbo_632MB")!,
+            sha256: nil
+        ),
+        Entry(
+            id: "whisper-distil-large-v3-turbo",
+            displayName: "distil-large-v3 turbo (English)",
+            sizeBytes: 600_000_000,
+            recommended: false,
+            engineKind: "whisperkit",
+            sourceURL: URL(string: "https://huggingface.co/argmaxinc/whisperkit-coreml/resolve/main/distil-whisper_distil-large-v3_turbo_600MB")!,
+            sha256: nil
+        ),
         Entry(
             id: "whisper-large-v3",
             displayName: "large-v3",

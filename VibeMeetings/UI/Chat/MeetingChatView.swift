@@ -111,6 +111,7 @@ struct MeetingChatView: View {
                 if !env.openAIApiKey.isEmpty {
                     Text("OpenAI").tag(OpenAIEngine.kind)
                 }
+                Text("Claude Code").tag(ClaudeCodeEngine.kind)
             }
             .pickerStyle(.segmented)
             .controlSize(.small)
@@ -304,10 +305,19 @@ struct MeetingChatView: View {
                         }
                     }
                 }
-                if message.content.isEmpty && chatService.isStreaming {
+                if let activity = message.activity {
+                    // What Claude is doing while it works through your meetings.
                     HStack(spacing: 6) {
                         ProgressView().controlSize(.small)
-                        Text("Thinking…").font(.caption).foregroundStyle(.secondary)
+                        Text(activity).font(.caption).foregroundStyle(.secondary).lineLimit(1)
+                    }
+                }
+                if message.content.isEmpty && chatService.isStreaming {
+                    if message.activity == nil {
+                        HStack(spacing: 6) {
+                            ProgressView().controlSize(.small)
+                            Text("Thinking…").font(.caption).foregroundStyle(.secondary)
+                        }
                     }
                 } else {
                     // Inline markdown (bold, italics, code, links), with the model's text
@@ -367,7 +377,10 @@ struct MeetingChatView: View {
         // Resolve engine and model based on the chat-specific picker.
         let engine: any SummarizationEngine
         let modelId: String
-        if chatEngineKind == OpenAIEngine.kind && !env.openAIApiKey.isEmpty {
+        if chatEngineKind == ClaudeCodeEngine.kind {
+            engine = ClaudeCodeEngine(promptBundle: .main)
+            modelId = env.selectedClaudeModelId
+        } else if chatEngineKind == OpenAIEngine.kind && !env.openAIApiKey.isEmpty {
             engine = OpenAIEngine(apiKey: env.openAIApiKey, promptBundle: .main)
             modelId = env.selectedOpenAIModelId
         } else {
@@ -389,7 +402,9 @@ struct MeetingChatView: View {
             modelId: modelId,
             store: env.meetingStore,
             folderTree: env.folderTree,
-            liveRecording: liveRecording
+            liveRecording: liveRecording,
+            // Claude Code reads the meeting files itself (read-only) unless the user turned that off.
+            libraryRoot: env.claudeSearchesLibrary ? env.rootURL : nil
         )
     }
 

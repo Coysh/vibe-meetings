@@ -27,8 +27,14 @@ final class AppRouter {
     /// Show the "New folder" sheet (set by the File menu; consumed by the sidebar).
     var pendingNewFolder = false
 
-    /// Select this meeting in the sidebar.
+    /// Open this meeting in the main pane.
     var selectMeetingID: UUID?
+
+    /// Open the Templates page (from a meeting's "+ Template" picker).
+    var showTemplatesPage = false
+
+    /// Focus the meeting list's search field (⌥⌘F); consumed by the list once it's on screen.
+    var pendingSearchFocus = false
 
     func requestNewFolder() {
         pendingNewFolder = true

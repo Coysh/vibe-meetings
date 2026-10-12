@@ -24,14 +24,10 @@ struct MeetingEndBanner: View {
             Spacer()
 
             Button("Stop recording", action: onStop)
-                .buttonStyle(.borderedProminent)
-                .tint(.red)
+                .buttonStyle(.capsule(.record))
             Button("Keep recording", action: onKeep)
-                .buttonStyle(.bordered)
+                .buttonStyle(.capsule(.secondary))
         }
-        .padding(.horizontal, 14)
-        .padding(.vertical, 10)
-        .background(.orange.opacity(0.12))
-        .overlay(alignment: .bottom) { Divider() }
+        .bannerCard(tint: .orange)
     }
 }

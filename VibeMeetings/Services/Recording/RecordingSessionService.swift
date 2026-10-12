@@ -189,8 +189,6 @@ final class RecordingSessionService {
             return s
         }
         let meeting = handle.meeting
-        let userNotes = controller.notes.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
-            ? nil : controller.notes
 
         self.controller = nil
         DockIconManager.clearRecordingBadge()
@@ -211,38 +209,56 @@ final class RecordingSessionService {
         // NOTE: we deliberately do NOT re-transcribe the echo-reduced audio —
         // that file is mono with the other party spectrally removed, so it
         // would collapse both speakers into one and drop the "Others" side.
-        let detectSpeakers = env.speakerDetectionEnabled && captureResult?.audioFileURL != nil
+        let hasAudio = captureResult?.audioFileURL != nil
+        let detectSpeakers = env.speakerDetectionEnabled && hasAudio
+        let refine = env.refineAfterRecording && hasAudio
         Task {
-            var finalSegments = segments
-            var finalMeeting = meeting
-            if detectSpeakers, await env.diarizationService.diarize(meetingID: meetingID, store: env.meetingStore) {
-                if let saved = try? await env.meetingStore.loadTranscript(for: meetingID) { finalSegments = saved }
-                if let handle = try? await env.meetingStore.openMeeting(id: meetingID) { finalMeeting = handle.meeting }
+            // First, transcribe the saved audio again with a larger model: the live transcript is made in real
+            // time and misses a lot. That pass also identifies the speakers (when enabled), and the summary then
+            // works from the better text — or from the live transcript if the pass fails.
+            var refined = false
+            if refine {
+                if env.recordingService.isBusy {
+                    // Another recording has already started: don't hold this one up. It's written up from the
+                    // live transcript now, and the summary is updated when the improved one is ready.
+                    Task { await self.improveLater(meetingID: meetingID, folderURL: folderURL) }
+                } else {
+                    // The meeting's page says so while it waits, and shows the default templates as coming.
+                    env.summaryService.setSummaryPending(true, for: meetingID)
+                    env.summaryService.queueTemplates(env.summaryTemplates.defaultTemplates.map(\.id), for: meetingID)
+                    refined = await env.refinementService.refine(
+                        meetingID: meetingID,
+                        folderURL: folderURL,
+                        env: env,
+                        onWaitingForRecording: { [env] in
+                            // A new recording interrupted the pass: write up from what there is now, rather
+                            // than holding the summary until that recording ends.
+                            guard env.summaryService.isSummaryPending(meetingID) else { return }
+                            Task { await env.writeUps(for: meetingID, includeDefaults: true, fallback: segments) }
+                        }
+                    )
+                    // Already written up (from the live transcript, early): just bring the summary up to date.
+                    if !env.summaryService.isSummaryPending(meetingID) {
+                        if refined { await env.writeUps(for: meetingID, includeDefaults: false) }
+                        return
+                    }
+                }
             }
-            startSummary(meetingID: meetingID, meeting: finalMeeting, segments: finalSegments, userNotes: userNotes)
+
+            // Otherwise identify the speakers here, from the live transcript.
+            if !refined, detectSpeakers {
+                _ = await env.diarizationService.diarize(meetingID: meetingID, store: env.meetingStore)
+            }
+            // The transcript is read from disk, so it's the improved one when there is one.
+            await env.writeUps(for: meetingID, includeDefaults: true, fallback: segments)
         }
     }
 
-    private func startSummary(meetingID: UUID, meeting: Meeting, segments: [TranscriptSegment], userNotes: String?) {
-        guard !segments.isEmpty else { return }
-
-        let modelId = env.activeSummarizationKind == OpenAIEngine.kind
-            ? env.selectedOpenAIModelId
-            : env.selectedOllamaModelId
-        let prompt = env.customSystemPrompt.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
-            ? nil : env.customSystemPrompt
-
-        env.summaryService.generate(
-            meetingID: meetingID,
-            meetingTitle: meeting.title,
-            segments: segments,
-            meeting: meeting,
-            engine: env.summarizationEngine,
-            modelId: modelId,
-            userNotes: userNotes,
-            customPrompt: prompt,
-            store: env.meetingStore,
-            silent: true
-        )
+    /// Improve a transcript once the current recording is over (which also re-runs speaker detection on it),
+    /// then bring its summary up to date — it was written from the live transcript.
+    private func improveLater(meetingID: UUID, folderURL: URL) async {
+        if await env.refinementService.refine(meetingID: meetingID, folderURL: folderURL, env: env) {
+            await env.writeUps(for: meetingID, includeDefaults: false)
+        }
     }
 }

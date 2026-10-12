@@ -172,10 +172,10 @@ struct TranscriptView: View {
                     }
                     .buttonStyle(.bordered)
                     .controlSize(.small)
-                    .padding(.trailing)
                     .padding(.vertical, 6)
                 }
-                Divider()
+                .readableWidth()
+                .padding(.horizontal, Tokens.Space.xl)
             }
 
             ScrollViewReader { proxy in
@@ -201,8 +201,9 @@ struct TranscriptView: View {
                             }
                         }
                     }
-                    .padding(.horizontal)
                     .padding(.vertical, 12)
+                    .readableWidth()
+                    .padding(.horizontal, Tokens.Space.xl)
                     .textSelection(.enabled)
                 }
                 // Track whether the reader is at the bottom: new live captions follow
@@ -337,11 +338,13 @@ struct TranscriptView: View {
     @ViewBuilder
     private func groupHeader(_ group: SpeakerGroup) -> some View {
         HStack(spacing: 8) {
-            Text(nameByID[group.speakerId] ?? group.speakerId.capitalized)
-                .font(.subheadline.bold())
-                .foregroundStyle(Self.speakerColor(speakerId: group.speakerId, channel: group.channel))
+            Circle()
+                .fill(Self.speakerColor(speakerId: group.speakerId, channel: group.channel))
+                .frame(width: 8, height: 8)
+                .accessibilityHidden(true)
+            speakerName(group)
             Text(group.start.formattedTimestamp)
-                .font(.caption2.monospacedDigit())
+                .font(.caption.monospacedDigit())
                 .foregroundStyle(.secondary)
         }
         .contextMenu {
@@ -353,6 +356,34 @@ struct TranscriptView: View {
             }
         }
         .accessibilityElement(children: .combine)
+    }
+
+    /// The speaker's name — with a dropdown to rename them, where renaming is allowed.
+    @ViewBuilder
+    private func speakerName(_ group: SpeakerGroup) -> some View {
+        let name = nameByID[group.speakerId] ?? group.speakerId.capitalized
+        if onRenameSpeaker != nil {
+            Menu {
+                Button("Rename “\(name)”…") {
+                    renameText = nameByID[group.speakerId] ?? ""
+                    renameSpeakerID = group.speakerId
+                }
+            } label: {
+                HStack(spacing: 3) {
+                    Text(name).font(.subheadline.weight(.semibold))
+                    Image(systemName: "chevron.down")
+                        .font(.caption2.weight(.bold))
+                        .foregroundStyle(.secondary)
+                }
+            }
+            .menuStyle(.button)
+            .buttonStyle(.plain)
+            .menuIndicator(.hidden)
+            .fixedSize()
+            .help("Rename this speaker")
+        } else {
+            Text(name).font(.subheadline.weight(.semibold))
+        }
     }
 
     /// Attendees from the calendar invite who aren't already a named speaker (max 3).

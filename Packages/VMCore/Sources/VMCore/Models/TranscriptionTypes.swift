@@ -8,6 +8,16 @@ public struct TranscriptionOptions: Sendable {
     public var beamSize: Int
     public var enableWordTimestamps: Bool
     public var noSpeechThreshold: Float
+    /// Live streaming strategy: commit settled text and advance (true), or re-decode a sliding window and
+    /// let each decode replace the last (false, the original behaviour — kept for comparison).
+    public var commitStreaming: Bool
+    /// How much new audio to wait for between live decodes. Measured on real recordings: 5 s keeps both
+    /// sides of a call within real time on the medium model, where 3 s did not.
+    public var liveHopSeconds: Double
+    /// How much of the text just settled is handed back to the model as context (characters). Off by
+    /// default: on real recordings it made decoding about 50% slower with no gain in accuracy, because every
+    /// prompt token costs a decoder step and any prompt also turns off WhisperKit's fast prefill cache.
+    public var liveContextCharacters: Int
 
     public init(
         language: String? = nil,
@@ -16,7 +26,10 @@ public struct TranscriptionOptions: Sendable {
         temperature: Float = 0.0,
         beamSize: Int = 5,
         enableWordTimestamps: Bool = true,
-        noSpeechThreshold: Float = 0.6
+        noSpeechThreshold: Float = 0.6,
+        commitStreaming: Bool = true,
+        liveHopSeconds: Double = 5,
+        liveContextCharacters: Int = 0
     ) {
         self.language = language
         self.translate = translate
@@ -25,6 +38,9 @@ public struct TranscriptionOptions: Sendable {
         self.beamSize = beamSize
         self.enableWordTimestamps = enableWordTimestamps
         self.noSpeechThreshold = noSpeechThreshold
+        self.commitStreaming = commitStreaming
+        self.liveHopSeconds = liveHopSeconds
+        self.liveContextCharacters = liveContextCharacters
     }
 
     public static let `default` = TranscriptionOptions()

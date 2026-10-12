@@ -5,7 +5,7 @@ struct SummaryView: View {
 
     var body: some View {
         ScrollView {
-            VStack(alignment: .leading, spacing: 8) {
+            VStack(alignment: .leading, spacing: 10) {
                 if markdown.isEmpty {
                     Text("No summary yet — stop the recording or click Generate Summary.")
                         .foregroundStyle(.secondary)
@@ -16,8 +16,9 @@ struct SummaryView: View {
                     }
                 }
             }
-            .padding()
-            .frame(maxWidth: .infinity, alignment: .leading)
+            .padding(.vertical, Tokens.Space.l)
+            .readableWidth()
+            .padding(.horizontal, Tokens.Space.xl)
         }
     }
 
@@ -102,12 +103,14 @@ struct SummaryView: View {
         switch block {
         case .heading(let level, let text):
             Text(inlineMarkdown(text))
-                .font(level == 1 ? .title2.bold() : level == 2 ? .headline : .subheadline.bold())
-                .padding(.top, level <= 2 ? 8 : 4)
+                .font(headingFont(level))
+                .padding(.top, level == 1 ? 14 : level == 2 ? 18 : 8)
                 .textSelection(.enabled)
+                .accessibilityAddTraits(.isHeader)
 
         case .paragraph(let text):
             Text(inlineMarkdown(text))
+                .lineSpacing(3)
                 .textSelection(.enabled)
 
         case .listItem(let text, let isCheckbox, let isChecked, let indent):
@@ -122,6 +125,7 @@ struct SummaryView: View {
                         .foregroundStyle(.secondary)
                 }
                 Text(inlineMarkdown(text))
+                    .lineSpacing(2)
                     .textSelection(.enabled)
             }
             .padding(.leading, CGFloat(indent) * 16)
@@ -138,6 +142,16 @@ struct SummaryView: View {
 
         case .rule:
             Divider().padding(.vertical, 4)
+        }
+    }
+
+    /// Serif for the big headings, in keeping with the page titles.
+    private func headingFont(_ level: Int) -> Font {
+        switch level {
+        case 1: .system(.title2, design: .serif).weight(.semibold)
+        case 2: .system(.title3).weight(.semibold)
+        case 3: .headline
+        default: .subheadline.bold()
         }
     }
 

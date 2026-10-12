@@ -23,13 +23,10 @@ struct SuggestionBanner: View {
             Spacer()
 
             Button("Start recording", action: onStart)
-                .buttonStyle(.borderedProminent)
+                .buttonStyle(.capsule(.primary))
             Button("Not now", action: onDismiss)
-                .buttonStyle(.bordered)
+                .buttonStyle(.capsule(.secondary))
         }
-        .padding(.horizontal, 14)
-        .padding(.vertical, 10)
-        .background(Color.accentColor.opacity(0.12))
-        .overlay(alignment: .bottom) { Divider() }
+        .bannerCard(tint: .accentColor)
     }
 }

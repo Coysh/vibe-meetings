@@ -28,7 +28,11 @@ let package = Package(
         ),
         // Offline evaluation harness (developer tool, not linked into the app):
         // runs speaker diarization over saved recordings and reports cluster counts.
+        .testTarget(name: "VMTranscriptionTests", dependencies: ["VMTranscription", "VMCore"]),
         .executableTarget(name: "vm-diar-eval", dependencies: ["VMTranscription", "VMCore"]),
+        // Offline harness: re-transcribes saved recordings with a chosen model and compares the result
+        // with the live transcript that was saved at the time. Read-only on the meetings folder.
+        .executableTarget(name: "vm-transcribe-eval", dependencies: ["VMTranscription", "VMCore"]),
     ],
     swiftLanguageModes: [.v6]
 )
