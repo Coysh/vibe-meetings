@@ -6,6 +6,8 @@ Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 versioned with [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
+### Fixed
+- **Check for Updates… was greyed out.** The menu item and the Settings button read Sparkle's "can check" flag once, while Sparkle was still starting up, and never looked again, so they stayed disabled until something unrelated redrew them. They now follow the flag as it changes
 
 ## [1.9.0] - 2026-10-12
 ### Added
@@ -250,6 +252,7 @@ versioned with [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - Resume recording for existing meetings
 
 [Unreleased]: https://github.com/Coysh/vibe-meetings/compare/v1.9.0...HEAD
+[1.9.1]: https://github.com/Coysh/vibe-meetings/compare/v1.9.0...v1.9.1
 [1.9.0]: https://github.com/Coysh/vibe-meetings/compare/v1.8.0...v1.9.0
 [1.8.0]: https://github.com/Coysh/vibe-meetings/compare/v1.7.3...v1.8.0
 [1.7.3]: https://github.com/Coysh/vibe-meetings/compare/v1.7.0...v1.7.3
