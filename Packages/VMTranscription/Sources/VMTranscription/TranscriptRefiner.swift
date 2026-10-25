@@ -22,8 +22,11 @@ public enum TranscriptRefiner {
     /// - Parameters:
     ///   - engine: a `WhisperKitEngine` with a model already loaded (use a separate instance from the live
     ///     one, so a recording in progress isn't disturbed).
-    ///   - echo: how strictly to remove the other side's voice from the "You" channel; `.conservative`
-    ///     when the recording was made on headphones.
+    ///   - echo: how strictly to remove the other side's voice from the "You" channel. `.offline` by
+    ///     default: this pass hears the *raw* microphone (the live echo canceller only ever touched what the
+    ///     live transcriber heard), and its two channels are timestamped by separate Whisper runs that drift
+    ///     apart by seconds, so the text filter has to reach further than it does live. `.conservative` when
+    ///     the recording was made on headphones.
     ///   - vocabulary: names and terms to respell where the model is slightly off (see `VocabularyCorrector`).
     ///   - maxSeconds: only the first part of the recording (for evaluation).
     ///   - progress: fraction done, 0…1; return `false` to stop (throws `CancellationError`).
@@ -31,7 +34,7 @@ public enum TranscriptRefiner {
         audioURL: URL,
         engine: WhisperKitEngine,
         options: TranscriptionOptions,
-        echo: EchoDedup.Config = .default,
+        echo: EchoDedup.Config = .offline,
         vocabulary: [String] = [],
         maxSeconds: Double? = nil,
         progress: @escaping @Sendable (Double) -> Bool

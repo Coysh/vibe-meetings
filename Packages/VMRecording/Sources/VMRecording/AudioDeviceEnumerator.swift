@@ -71,6 +71,27 @@ public enum AudioDeviceEnumerator {
         return status == noErr ? deviceID : nil
     }
 
+    /// The display name of a device, or nil if it's gone.
+    public static func name(for deviceID: AudioDeviceID) -> String? {
+        deviceName(for: deviceID)
+    }
+
+    /// Where sound is going right now (the speakers the other side's voices come out of).
+    public static func defaultOutputDeviceName() -> String? {
+        var deviceID: AudioDeviceID = 0
+        var size = UInt32(MemoryLayout<AudioDeviceID>.size)
+        var addr = AudioObjectPropertyAddress(
+            mSelector: kAudioHardwarePropertyDefaultOutputDevice,
+            mScope: kAudioObjectPropertyScopeGlobal,
+            mElement: kAudioObjectPropertyElementMain
+        )
+        let status = AudioObjectGetPropertyData(
+            AudioObjectID(kAudioObjectSystemObject), &addr, 0, nil, &size, &deviceID
+        )
+        guard status == noErr, deviceID != kAudioObjectUnknown else { return nil }
+        return deviceName(for: deviceID)
+    }
+
     // MARK: - Private helpers
 
     private static func deviceName(for deviceID: AudioDeviceID) -> String? {

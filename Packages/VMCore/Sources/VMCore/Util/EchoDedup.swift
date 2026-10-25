@@ -54,6 +54,17 @@ public enum EchoDedup {
         /// 1–2 word fragments are only dropped when their system twin is this
         /// close in time.
         public var fragmentTolerance: TimeInterval = 1.0
+        /// Beyond `lagTolerance`/`leadTolerance`, also look this far either side for a *verbatim*
+        /// echo. Off (0) for the live transcript, where both channels sit on the capture clock. On
+        /// for the post-meeting pass, where each channel is timestamped by its own Whisper run over
+        /// the whole file and the two drift apart by seconds: measured on real recordings, the far
+        /// side's lines sat 2–4 s earlier than the live clock had them while the mic's were right,
+        /// so echoes in the "You" channel trailed their source by 4–10 s and sailed through.
+        public var farTolerance: TimeInterval = 0
+        /// A far match has to be near-verbatim and reasonably long — people do repeat each other's
+        /// words a few seconds later, and that must stay.
+        public var farCoverageThreshold: Double = 0.9
+        public var farMinWords: Int = 7
         /// Use the original single-segment containment algorithm. Appropriate
         /// when acoustic cancellation reports "no echo path" (headphones), where
         /// the aggressive matcher has nothing to catch and only risks dropping
@@ -63,6 +74,13 @@ public enum EchoDedup {
         public init() {}
 
         public static let `default` = Config()
+
+        /// For transcripts made from the saved recording after the meeting (see `farTolerance`).
+        public static var offline: Config {
+            var c = Config()
+            c.farTolerance = 10
+            return c
+        }
 
         public static var conservative: Config {
             var c = Config()
@@ -123,7 +141,8 @@ public enum EchoDedup {
         let n = mic.count
         guard n > 0 else { return seg }
 
-        let window = slice(stream, from: seg.start - config.window, to: seg.end + config.window)
+        let reach = max(config.window, config.farTolerance)
+        let window = slice(stream, from: seg.start - reach, to: seg.end + reach)
         guard !window.isEmpty else { return seg }
 
         // 1–2 word fragments: nearly always keep.
@@ -152,7 +171,36 @@ public enum EchoDedup {
             return nil
         }
 
+        // Before cutting a partial near match out of it: an echo whose lag straddles the near
+        // tolerance half-matches near and fully matches far, and must go whole, not leave a stub.
+        if config.farTolerance > 0, n >= config.farMinWords,
+           isFarEcho(seg, mic: mic, contentIdx: contentIdx, window: window, config: config) {
+            return nil
+        }
+
         return trimmed(seg, mic: mic, matched: matched, config: config)
+    }
+
+    /// The whole segment, near-verbatim, said by the other side several seconds away — further
+    /// than the live channels ever skew, but what the post-meeting pass's per-channel timestamps do.
+    private static func isFarEcho(
+        _ seg: TranscriptSegment,
+        mic: [(token: String, range: Range<String.Index>)],
+        contentIdx: [Int],
+        window: [SystemToken],
+        config: Config
+    ) -> Bool {
+        let n = mic.count
+        let dur = max(seg.end - seg.start, 0)
+        let align = TextSimilarity.lcsAlignment(micCount: n, sysCount: window.count) { i, j in
+            let micTime = seg.start + dur * (Double(i) + 0.5) / Double(n)
+            return abs(micTime - window[j].time) <= config.farTolerance
+                && TextSimilarity.fuzzyEqual(mic[i].token, window[j].text)
+        }
+        let matched = align.map { $0 != nil }
+        let coverage = Double(matched.filter { $0 }.count) / Double(n)
+        let contentCoverage = Double(contentIdx.filter { matched[$0] }.count) / Double(contentIdx.count)
+        return coverage >= config.farCoverageThreshold && contentCoverage >= config.farCoverageThreshold
     }
 
     /// Cuts echoed runs out of a segment that also contains genuine speech

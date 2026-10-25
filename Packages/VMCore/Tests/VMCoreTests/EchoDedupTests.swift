@@ -191,6 +191,57 @@ final class EchoDedupTests: XCTestCase {
         XCTAssertEqual(texts(EchoDedup.suppress(segs, config: .conservative), .mic).count, 1)
     }
 
+    // MARK: - Offline (post-meeting) pass
+
+    /// The post-meeting pass timestamps each channel with its own Whisper run, and on real
+    /// recordings the far side's lines came out 2–4 s early, so a verbatim echo trailed its source
+    /// by 4–10 s. The live tolerance misses that; the offline config catches it.
+    func testOfflineCatchesVerbatimEchoTrailingBySeconds() {
+        let segs = [
+            system("so basically the brilliant idea is that we have a monthly recording which is", 25.6, 34.1),
+            mic("So basically the brilliant idea is that we have a monthly recording which is", 29.2, 36.5)
+        ]
+        XCTAssertEqual(texts(EchoDedup.suppress(segs), .mic).count, 1, "beyond the live tolerance: untouched live")
+        XCTAssertTrue(texts(EchoDedup.suppress(segs, config: .offline), .mic).isEmpty, "the offline pass drops it")
+    }
+
+    /// Echo that trails by 9 s, with Whisper's usual small differences, still goes.
+    func testOfflineCatchesNearVerbatimEchoNineSecondsLate() {
+        let segs = [
+            system("and this is going to be a real added value for them throughout the year", 36.2, 40.8),
+            mic("And this is going to be real added value for them throughout the year.", 45.3, 49.6)
+        ]
+        XCTAssertTrue(texts(EchoDedup.suppress(segs, config: .offline), .mic).isEmpty)
+    }
+
+    /// Repeating a short phrase of the other side's a few seconds later is conversation, not echo.
+    func testOfflineKeepsShortRepeat() {
+        let segs = [
+            system("the contract renewal is due friday", 60.0, 62.0),
+            mic("the contract renewal is due friday", 66.5, 68.5)
+        ]
+        XCTAssertEqual(texts(EchoDedup.suppress(segs, config: .offline), .mic).count, 1, "six words: too short for the far rule")
+    }
+
+    /// Quoting with one's own words around it (coverage under 90%) is kept even when long.
+    func testOfflineKeepsLooseQuote() {
+        let segs = [
+            system("the migration to the new platform finishes on thursday", 20.0, 24.0),
+            mic("right so you said the migration to the new platform finishes on thursday", 29.0, 33.0)
+        ]
+        XCTAssertEqual(texts(EchoDedup.suppress(segs, config: .offline), .mic).count, 1)
+    }
+
+    /// The far rule doesn't loosen the near one: a near echo is still trimmed, not dropped whole.
+    func testOfflineStillTrimsNearMixedSegment() {
+        let segs = [
+            system("the quarterly numbers look strong this time", 30.0, 33.0),
+            mic("the quarterly numbers look strong this time and I disagree with the forecast", 30.0, 36.0)
+        ]
+        let kept = EchoDedup.suppress(segs, config: .offline).filter { $0.channel == .mic }
+        XCTAssertEqual(kept.map(\.text), ["and I disagree with the forecast"])
+    }
+
     /// 500 segments must stay cheap — this runs on every live transcript update.
     func testPerformanceOnLongMeeting() {
         var segs: [TranscriptSegment] = []

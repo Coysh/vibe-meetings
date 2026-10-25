@@ -9,6 +9,7 @@
 /* Begin PBXBuildFile section */
 		0A4048BC3077756B43E64C5C /* CalendarAccessView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2A305B071F58C239C8FFEC71 /* CalendarAccessView.swift */; };
 		1ACD1614D2868F7F656CC41C /* RecordingBarView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 148AAE13D07C30E6D0A2A196 /* RecordingBarView.swift */; };
+		7A1C0F3E5B2D4C6E8F905678 /* RecordToolbarButton.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7A1C0F3E5B2D4C6E8F901234 /* RecordToolbarButton.swift */; };
 		27C8BA7B47646DDDCDECFD33 /* VMTranscription in Frameworks */ = {isa = PBXBuildFile; productRef = 92C921174A047821FC67EA38 /* VMTranscription */; };
 		2B328E480C6222351A847A2D /* SidebarView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 85E5BAD8B193EF9205A95ED7 /* SidebarView.swift */; };
 		2DFACC0EBC269755DAC6E048 /* CalendarSettingsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4757B8F5683B1C700A160B7E /* CalendarSettingsView.swift */; };
@@ -86,6 +87,7 @@
 
 /* Begin PBXFileReference section */
 		148AAE13D07C30E6D0A2A196 /* RecordingBarView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RecordingBarView.swift; sourceTree = "<group>"; };
+		7A1C0F3E5B2D4C6E8F901234 /* RecordToolbarButton.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RecordToolbarButton.swift; sourceTree = "<group>"; };
 		2A305B071F58C239C8FFEC71 /* CalendarAccessView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CalendarAccessView.swift; sourceTree = "<group>"; };
 		3118BBD953FAA85CF0032A13 /* OllamaCheckView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OllamaCheckView.swift; sourceTree = "<group>"; };
 		358A142BAB239A6A417C3DC7 /* VMCalendar */ = {isa = PBXFileReference; lastKnownFileType = folder; name = VMCalendar; path = Packages/VMCalendar; sourceTree = SOURCE_ROOT; };
@@ -186,6 +188,7 @@
 				001F3C0A8E5250F0F8C45BE4 /* RecordingQuickSettings.swift */,
 				3CF900D4A92FEED161ADB88F /* BannerCoordinator.swift */,
 				148AAE13D07C30E6D0A2A196 /* RecordingBarView.swift */,
+				7A1C0F3E5B2D4C6E8F901234 /* RecordToolbarButton.swift */,
 				EAEF86E1A60C4514C0ADB2BF /* SuggestionBanner.swift */,
 				4FE2332F2FB20C8D006F29C4 /* MicActiveBanner.swift */,
 				4FE233312FB20C94006F29C4 /* MeetingEndBanner.swift */,
@@ -560,6 +563,7 @@
 				DE91E996433585F7D716E435 /* PermissionsView.swift in Sources */,
 				4FCAC1AE2FB3338300AC4E2E /* DockIconManager.swift in Sources */,
 				1ACD1614D2868F7F656CC41C /* RecordingBarView.swift in Sources */,
+				7A1C0F3E5B2D4C6E8F905678 /* RecordToolbarButton.swift in Sources */,
 				4FE233362FB22ECD006F29C4 /* MeetingMetadataEditor.swift in Sources */,
 				4FCAC1BE2FB513B100AC4E2E /* SparkleUpdater.swift in Sources */,
 				DAFBA525419AC3593E15C652 /* RootView.swift in Sources */,

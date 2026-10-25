@@ -227,6 +227,7 @@ final class AppEnvironment {
     private static let detectBrowserCallsKey = "VibeMeetings.Detection.BrowserCalls"
     private static let showOverlayKey = "VibeMeetings.Overlay.Enabled"
     private static let overlaySizeKey = "VibeMeetings.Overlay.SizeMode"
+    private static let overlayTextSizeKey = "VibeMeetings.Overlay.TextSize"
     private static let appearanceKey = "VibeMeetings.Appearance"
     private static let languageKey = "VibeMeetings.Transcription.Language"
     private static let vocabularyKey = "VibeMeetings.Transcription.Vocabulary"
@@ -335,6 +336,11 @@ final class AppEnvironment {
         didSet { UserDefaults.standard.set(recordingOverlaySize.rawValue, forKey: Self.overlaySizeKey) }
     }
 
+    /// Text size of the live transcript in the Expanded floating card.
+    var overlayTextSize: OverlayTextSize {
+        didSet { UserDefaults.standard.set(overlayTextSize.rawValue, forKey: Self.overlayTextSizeKey) }
+    }
+
     /// Forget the dragged position; the indicator returns to top-centre now.
     func resetRecordingOverlayPosition() {
         overlay?.resetPosition()
@@ -415,6 +421,7 @@ final class AppEnvironment {
         self.showRecordingOverlay = defaults.object(forKey: Self.showOverlayKey) as? Bool ?? true
         self.appearance = defaults.string(forKey: Self.appearanceKey).flatMap(AppearanceMode.init(rawValue:)) ?? .dark
         self.recordingOverlaySize = defaults.string(forKey: Self.overlaySizeKey).flatMap(OverlaySizeMode.init(rawValue:)) ?? .standard
+        self.overlayTextSize = defaults.string(forKey: Self.overlayTextSizeKey).flatMap(OverlayTextSize.init(rawValue:)) ?? .medium
         if let stored = defaults.object(forKey: Self.onboardingKey) as? Bool {
             self.hasCompletedOnboarding = stored
         } else {
