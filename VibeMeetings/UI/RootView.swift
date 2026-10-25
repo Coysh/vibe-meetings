@@ -195,6 +195,10 @@ struct RootView: View {
 
     @ToolbarContentBuilder
     private var toolbarContent: some ToolbarContent {
+        // Record / Stop from any page, without going Home or through a sheet.
+        ToolbarItem(placement: .primaryAction) {
+            RecordToolbarButton()
+        }
         ToolbarItem(placement: .primaryAction) {
             Button {
                 // Open on all meetings; if it is already showing a single

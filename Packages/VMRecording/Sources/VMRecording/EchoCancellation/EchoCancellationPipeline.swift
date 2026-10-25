@@ -10,9 +10,19 @@ public struct EchoCancellationStats: Sendable, Codable, Equatable {
         case bypass
         /// Echo path found: the cancelled mic is what gets transcribed.
         case active
+        /// The canceller was making the mic *louder* (a wrong delay, a shifting one — Bluetooth —
+        /// or no real echo path), so it was thrown away and the raw mic is passed through while
+        /// the echo path is estimated afresh.
+        case recovering
     }
 
     public var mode: Mode = .noReference
+    /// Times the "do no harm" guard tripped: the cancelled mic was louder than the raw mic for
+    /// several seconds, so the filter was discarded and the mic passed through for a while.
+    public var harmTrips: Int = 0
+    /// The microphone and output device in use, for reading these diagnostics later.
+    public var micDevice: String?
+    public var outputDevice: String?
     /// Committed speaker→mic bulk delay, in milliseconds.
     public var delayMs: Double?
     /// Peak-to-mean confidence of the last delay estimate (≥ ~10 means a real echo path).
@@ -74,6 +84,17 @@ public final class EchoCancellationPipeline: @unchecked Sendable {
         public var crossfadeSeconds = 0.05
         /// Seconds between delay estimates.
         public var estimateInterval = 1.0
+        /// The committed bulk delay is only moved when a new estimate differs from it by more than
+        /// this. Smaller moves are within what the filter's early taps already model (there is 5 ms
+        /// of slack before the echo), and re-aligning the reference for them only disturbs a filter
+        /// that had converged — on real calls the estimate wobbles by 1–3 ms all meeting long.
+        public var delayDeadband: TimeInterval = 0.0025
+        /// "Do no harm": seconds of reference-active audio with the cancelled mic *louder* than the
+        /// raw mic before the filter is discarded and the raw mic passed through.
+        public var harmSeconds = 3.0
+        /// How long the raw mic is passed through after the guard trips, before cancellation is
+        /// tried again with a fresh delay estimate.
+        public var harmRecoverySeconds = 20.0
         public init() {}
     }
 
@@ -116,6 +137,13 @@ public final class EchoCancellationPipeline: @unchecked Sendable {
     private var mode: EchoCancellationStats.Mode = .active
     private var mixWeight: Float = 0              // 0 = raw mic … 1 = cancelled
     private var refActiveSecondsWithoutEcho = 0.0
+    private var harmGuard: HarmGuard
+    /// Mic time (seconds of processed mic audio) until which the raw mic is passed through after
+    /// the harm guard tripped.
+    private var recoveringUntil: Double?
+    /// Delay-estimate confidence currently required to commit; raised after each harm trip, since a
+    /// weak peak was what led the canceller astray.
+    private var requiredConfidence: Double
     private var waitStart: UInt64?
     private var startWait: UInt64?
     private var fallbackScheduled = false
@@ -144,6 +172,17 @@ public final class EchoCancellationPipeline: @unchecked Sendable {
         micFrame = [Float](repeating: 0, count: configuration.frameSize)
         refFrame = micFrame
         aecFrame = micFrame
+        harmGuard = HarmGuard(tripAfterSeconds: configuration.harmSeconds)
+        requiredConfidence = configuration.minDelayConfidence
+    }
+
+    /// Note which devices are in use, so the saved diagnostics say what setup they describe.
+    public func setDeviceNames(mic: String?, output: String?) {
+        queue.async {
+            self.stat.micDevice = mic
+            self.stat.outputDevice = output
+            self.publishStats()
+        }
     }
 
     // MARK: - Public API
@@ -273,7 +312,11 @@ public final class EchoCancellationPipeline: @unchecked Sendable {
                         }
                     }
                 }
-                recordERLE()
+                // While recovering the filter still runs (so it can converge again) but its output is
+                // not what goes out, so it can't be doing harm; only judge it while it is in use.
+                if let erle = recordERLE(), mode == .active, harmGuard.observe(erleDB: erle, seconds: Double(f) / fs) {
+                    tripHarmGuard(atMicTime: frameTime)
+                }
             }
 
             mixAndEmit(count: count)
@@ -408,7 +451,7 @@ public final class EchoCancellationPipeline: @unchecked Sendable {
         guard let result = estimator.estimate(mic: micWindow, ref: refWindow) else { return }
         stat.delayConfidence = result.confidence
 
-        if result.confidence >= cfg.minDelayConfidence {
+        if result.confidence >= requiredConfidence {
             refActiveSecondsWithoutEcho = 0
             recentEstimates.append(result.delaySamples)
             if recentEstimates.count > 5 { recentEstimates.removeFirst() }
@@ -417,9 +460,33 @@ public final class EchoCancellationPipeline: @unchecked Sendable {
             refActiveSecondsWithoutEcho += cfg.estimateInterval
         }
 
+        guard mode != .noReference else { return }
+        // After the harm guard tripped, keep the raw mic flowing for a while (the filter keeps
+        // adapting underneath, and the delay keeps being re-estimated) before cancelling again.
+        if let until = recoveringUntil {
+            if Double(micProcessed) / fs < until { mode = .recovering; return }
+            recoveringUntil = nil
+            resetFilter()
+            harmGuard.reset()
+        }
         // No echo path for long enough while the far end talks → headphones.
-        let wanted: EchoCancellationStats.Mode = refActiveSecondsWithoutEcho >= cfg.noCouplingSeconds ? .bypass : .active
-        if mode != .noReference { mode = wanted }
+        mode = refActiveSecondsWithoutEcho >= cfg.noCouplingSeconds ? .bypass : .active
+    }
+
+    /// The cancelled mic has been louder than the raw mic for a while: whatever the filter learned
+    /// is wrong (a mistaken delay, an echo path that moves, or no echo at all). Stop using it.
+    private func tripHarmGuard(atMicTime time: Double) {
+        stat.harmTrips += 1
+        resetFilter()
+        recentEstimates.removeAll()
+        committedDelaySamples = nil
+        appliedDelay = 0
+        readInit = false
+        // A weak correlation peak is what led it astray: ask for a clearer one next time.
+        requiredConfidence = min(cfg.minDelayConfidence + 5 * Double(stat.harmTrips), 30)
+        recoveringUntil = Double(micProcessed) / fs + cfg.harmRecoverySeconds
+        mode = .recovering
+        publishStats()
     }
 
     /// Commit a new bulk delay when 3 of the last 5 estimates agree within 1 ms.
@@ -430,7 +497,7 @@ public final class EchoCancellationPipeline: @unchecked Sendable {
             let cluster = recentEstimates.filter { abs($0 - candidate) <= tolerance }
             guard cluster.count >= 3 else { continue }
             let median = cluster.sorted()[cluster.count / 2]
-            if let committed = committedDelaySamples, abs(median - committed) <= Int(0.0005 * fs) { return }
+            if let committed = committedDelaySamples, abs(median - committed) <= Int(cfg.delayDeadband * fs) { return }
             committedDelaySamples = median
             stat.delayCommits += 1
             // Leave a little slack before the echo so the filter's early taps
@@ -453,7 +520,9 @@ public final class EchoCancellationPipeline: @unchecked Sendable {
         stat.filterResets += 1
     }
 
-    private func recordERLE() {
+    /// Echo-return-loss enhancement of this frame (dB), or nil when the far end is silent.
+    @discardableResult
+    private func recordERLE() -> Float? {
         var micE: Float = 0, refE: Float = 0, outE: Float = 0
         for i in 0..<cfg.frameSize {
             micE += micFrame[i] * micFrame[i]
@@ -461,10 +530,11 @@ public final class EchoCancellationPipeline: @unchecked Sendable {
             outE += aecFrame[i] * aecFrame[i]
         }
         let n = Float(cfg.frameSize)
-        guard (refE / n).squareRoot() > 0.00316, micE > 0 else { return }   // reference active only
+        guard (refE / n).squareRoot() > 0.00316, micE > 0 else { return nil }   // reference active only
         let erle = 10 * log10f((micE + 1e-9) / (outE + 1e-9))
         erleRing.append(max(-10, min(60, erle)))
         if erleRing.count > 625 { erleRing.removeFirst(erleRing.count - 625) }
+        return erle
     }
 
     private func publishStats() {
@@ -479,4 +549,39 @@ public final class EchoCancellationPipeline: @unchecked Sendable {
         _stats = s
         statsLock.unlock()
     }
+}
+
+/// Decides when the canceller is doing more harm than good.
+///
+/// A linear echo canceller can only *remove* energy that correlates with its reference. If its
+/// output is consistently louder than its input while the far end is talking, it has learned
+/// something false — a bulk delay from a spurious correlation peak, or an echo path that keeps
+/// moving (Bluetooth output) — and every frame it processes garbles the user's side further. Real
+/// double-talk dips a frame or two below zero, never seconds on end, so time spent clearly
+/// negative is the test. Good frames pay the debt down at half rate, so a canceller that is
+/// negative half the time still trips, just later.
+struct HarmGuard {
+    /// Frames below this count as harm (a frame-level ERLE of 0 ± a fraction of a dB is normal).
+    static let harmThresholdDB: Float = -1
+    let tripAfterSeconds: Double
+    private(set) var harmSeconds = 0.0
+
+    init(tripAfterSeconds: Double) {
+        self.tripAfterSeconds = tripAfterSeconds
+    }
+
+    /// Feed one reference-active frame. Returns true the moment the harm budget is used up (and
+    /// starts over, so the caller needn't reset unless it wants to forgive earlier frames).
+    mutating func observe(erleDB: Float, seconds: Double) -> Bool {
+        if erleDB < Self.harmThresholdDB {
+            harmSeconds += seconds
+        } else {
+            harmSeconds = max(0, harmSeconds - seconds / 2)
+        }
+        guard harmSeconds >= tripAfterSeconds else { return false }
+        harmSeconds = 0
+        return true
+    }
+
+    mutating func reset() { harmSeconds = 0 }
 }

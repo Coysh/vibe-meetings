@@ -73,6 +73,8 @@ final class RecordingController {
     var systemAudioIssue: String?
     /// Name of the microphone being recorded, for display.
     var micDeviceName = "System Default"
+    /// What the echo canceller is doing, refreshed every couple of seconds; nil until it reports.
+    var echoStats: EchoCancellationStats?
     /// Set when startup failed because a permission is missing.
     private(set) var failedPermission: RecordingPermission?
     /// True from pressing Stop until the transcript and metadata are on disk.
@@ -278,9 +280,13 @@ final class RecordingController {
     /// When the canceller has concluded the user is on headphones (no echo path),
     /// there is no echo to catch, so fall back to the conservative filter and
     /// don't risk dropping genuine speech that happens to resemble the far end.
+    /// Not if it ever had to give up on a wrong echo path: then "no echo path"
+    /// more likely means it couldn't find one, and the text filter is all there is.
     private func syncEchoFilterMode() {
-        let mode = coordinator.echoStats?.mode
-        merger.setEchoConfig(mode == .bypass ? .conservative : .default)
+        let stats = coordinator.echoStats
+        echoStats = stats
+        let headphones = stats?.mode == .bypass && (stats?.harmTrips ?? 0) == 0
+        merger.setEchoConfig(headphones ? .conservative : .default)
     }
 
     /// Persist the current merged transcript to disk mid-recording. Segments are
@@ -411,6 +417,30 @@ final class RecordingController {
             return "Vibe Meetings doesn't have \(permission.title) access. Allow it in System Settings, then try again."
         }
         return error.localizedDescription
+    }
+}
+
+extension RecordingController {
+    /// What the echo canceller is doing, in a few words, with a longer explanation for a tooltip.
+    /// Nil when there is nothing useful to say yet (or no system audio to cancel against).
+    var echoStatus: (text: String, detail: String)? {
+        guard let stats = echoStats, systemAudioIssue == nil else { return nil }
+        switch stats.mode {
+        case .noReference:
+            return nil
+        case .active:
+            var detail = "The other people's voices your microphone picks up from the speakers are being cancelled before transcription."
+            if let erle = stats.erleDB, erle > 0 { detail += String(format: " Removing about %.0f dB.", erle) }
+            if let delay = stats.delayMs { detail += String(format: " Speaker-to-mic delay %.0f ms.", delay) }
+            return ("Echo cancelled", detail)
+        case .bypass:
+            if stats.harmTrips == 0 {
+                return ("Headphones", "No speaker echo reaches your microphone, so it is transcribed as it is.")
+            }
+            return ("Echo not cancelled", "Your microphone doesn't match the call audio closely enough to cancel the speakers' echo from it (a Bluetooth speaker, or no echo at all). The transcript's own echo filter still applies.")
+        case .recovering:
+            return ("Echo: re-learning", "Cancellation was making your microphone worse, so it was stopped and the speaker-to-mic delay is being measured again.")
+        }
     }
 }
 

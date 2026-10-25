@@ -85,6 +85,7 @@ public actor AudioCaptureCoordinator: AudioCaptureService {
         }
 
         startEpoch = MicrophoneCapturer.nowHostSeconds()
+        _echo.micDeviceID = micDeviceID
 
         print("[Coordinator] starting mic, deviceID=\(String(describing: micDeviceID))")
         do {
@@ -118,7 +119,14 @@ public actor AudioCaptureCoordinator: AudioCaptureService {
     public func switchMicDevice(to deviceID: AudioDeviceID?) throws {
         guard isRunning else { return }
         try mic.switchDevice(to: deviceID)
+        _echo.micDeviceID = deviceID
         _echo.pipeline?.resetForDeviceChange()
+        _echo.pipeline?.setDeviceNames(mic: Self.micName(for: deviceID), output: AudioDeviceEnumerator.defaultOutputDeviceName())
+    }
+
+    private static func micName(for deviceID: AudioDeviceID?) -> String? {
+        let id = deviceID ?? AudioDeviceEnumerator.defaultInputDeviceID()
+        return id.flatMap { AudioDeviceEnumerator.name(for: $0) }
     }
 
     public func pause() async {
@@ -189,6 +197,7 @@ public actor AudioCaptureCoordinator: AudioCaptureService {
         var aec: EchoCancellationPipeline?
         if _echo.enabled && _echo.systemAvailable {
             let pipe = EchoCancellationPipeline()
+            pipe.setDeviceNames(mic: Self.micName(for: _echo.micDeviceID), output: AudioDeviceEnumerator.defaultOutputDeviceName())
             _echo.pipeline = pipe
             aec = pipe
             let debugWriter = _echo.debugWAVURL.flatMap { try? CrashSafeWAVWriter(url: $0, sampleRate: 16_000, channels: 1) }
@@ -280,8 +289,10 @@ private final class EchoBox: @unchecked Sendable {
     private var _pipeline: EchoCancellationPipeline?
     private var _systemAvailable = false
     private var _systemError: String?
+    private var _micDeviceID: AudioDeviceID?
 
     var enabled: Bool { get { lock.withLock { _enabled } } set { lock.withLock { _enabled = newValue } } }
+    var micDeviceID: AudioDeviceID? { get { lock.withLock { _micDeviceID } } set { lock.withLock { _micDeviceID = newValue } } }
     var debugWAVURL: URL? { get { lock.withLock { _debugWAVURL } } set { lock.withLock { _debugWAVURL = newValue } } }
     var pipeline: EchoCancellationPipeline? { get { lock.withLock { _pipeline } } set { lock.withLock { _pipeline = newValue } } }
     var systemAvailable: Bool { get { lock.withLock { _systemAvailable } } set { lock.withLock { _systemAvailable = newValue } } }

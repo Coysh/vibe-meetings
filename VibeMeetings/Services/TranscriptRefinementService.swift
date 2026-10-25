@@ -314,7 +314,7 @@ final class TranscriptRefinementService {
             let meeting = handle.meeting
             let audio = MeetingFolder(url: handle.folderURL).audioURL
             let options = env.transcriptionOptions(for: meeting, commitStreaming: false)
-            let echo: EchoDedup.Config = Self.recordedOnHeadphones(folder: handle.folderURL) ? .conservative : .default
+            let echo: EchoDedup.Config = Self.recordedOnHeadphones(folder: handle.folderURL) ? .conservative : .offline
             statuses[meetingID] = .running(0)
 
             do {
@@ -401,10 +401,11 @@ final class TranscriptRefinementService {
     }
 
     /// The echo canceller noted that this recording was made on headphones (so there's little echo to remove).
+    /// Not if its "do no harm" guard ever tripped: then "no echo path" more likely means it couldn't find one.
     private static func recordedOnHeadphones(folder: URL) -> Bool {
         guard let data = try? Data(contentsOf: folder.appendingPathComponent("aec-stats.json")),
               let json = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any] else { return false }
-        return (json["mode"] as? String) == "bypass"
+        return (json["mode"] as? String) == "bypass" && ((json["harmTrips"] as? Int) ?? 0) == 0
     }
 
     private func acquire() async {

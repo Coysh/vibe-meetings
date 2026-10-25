@@ -45,7 +45,11 @@ struct RecordingBarView: View {
                     .font(.callout.monospacedDigit())
                     .foregroundStyle(.secondary)
 
-                LevelMeterView(level: controller.micLevel, label: "You", detail: controller.micDeviceName)
+                LevelMeterView(
+                    level: controller.micLevel,
+                    label: "You",
+                    detail: controller.micDeviceName + (controller.echoStatus.map { " · \($0.text.lowercased())" } ?? "")
+                )
                 if controller.systemAudioIssue == nil {
                     LevelMeterView(level: controller.systemLevel, label: "Others", detail: "System audio")
                 } else {

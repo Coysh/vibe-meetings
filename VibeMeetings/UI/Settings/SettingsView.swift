@@ -262,7 +262,7 @@ private struct RecordingSettingsView: View {
                         env.resetRecordingOverlayPosition()
                     }
                 }
-                Text("A small pill that floats above other apps: “Not recording · Record” during a call, and a timer with Stop while recording. Drag it from anywhere — it snaps to screen edges. Compact is just the timer and Stop; Expanded adds the live transcript and level meters, and can be resized. Right-click it to change size.")
+                Text("A small pill that floats above other apps: “Not recording · Record” during a call, and a timer with Stop while recording. Drag it from anywhere — it snaps to screen edges. Compact is just the timer and Stop; Expanded is a resizable card with the scrolling live transcript, level meters and echo status. Right-click it to change its size or text size.")
                     .font(.caption)
                     .foregroundStyle(.secondary)
 
