@@ -6,6 +6,8 @@ Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 versioned with [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
+
+## [1.10.0] - 2026-10-25
 ### Added
 - **Record from anywhere.** A red Record button sits in the main window's toolbar on every page. One click starts recording straight away, linked to the calendar event that's on (its title becomes the meeting's) or the call app holding the microphone; the chevron beside it offers Join & Record and the New Meeting sheet. While recording it becomes the timer and Stop
 - **The floating card is a proper live transcript window.** Expanded mode now scrolls: lines are grouped under the speaker's name with a timestamp, the in-progress line is dimmed, and it follows the newest words unless you've scrolled up to re-read something, when a "Latest" button brings you back. Text size (small, medium, large) is a click on the header or in the right-click menu; the footer shows both level meters, what the echo canceller is doing ("Echo cancelled", "Headphones", "Echo: re-learning"), and Stop. Drag it by the header or footer
@@ -15,6 +17,7 @@ versioned with [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - **Speaker echo in the finished transcript.** The other side's words were turning up as lines of yours in the *improved* (post-meeting) transcript even when the live one was clean: that pass hears the raw microphone, and its two channels are timestamped by separate Whisper runs that sit several seconds apart, so the echo filter — which only looked 3 s either side — missed them. Measured across 28 recent recordings, your "You" lines matched the other side verbatim 4–10 s apart in 172 places (73 in one meeting). The post-meeting pass now also removes a near-verbatim line of seven or more words that the other side said within 10 s; the live transcript's filter is unchanged
 - **Echo cancellation that made things worse.** On three recent recordings the canceller locked onto a false speaker-to-mic delay (about 300 ms, as a Bluetooth speaker or a setup with no real echo gives) and for the rest of the call its output was *louder* than the raw microphone. It now watches its own effect: if the cancelled mic is louder than the raw one for three seconds it discards what it learned, passes the raw microphone through for 20 s, and only tries again with a clearer delay estimate. A recording where that happened is no longer taken for "headphones" by the text filter
 - The canceller stopped re-aligning its reference for sub-3 ms wobbles in the delay estimate, which on some calls happened every few seconds (up to 238 times in an hour) and kept knocking a converged filter off
+
 
 ## [1.9.1] - 2026-10-13
 ### Fixed
@@ -263,7 +266,7 @@ versioned with [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - Microphone device selection in Settings
 - Resume recording for existing meetings
 
-[Unreleased]: https://github.com/Coysh/vibe-meetings/compare/v1.9.1...HEAD
+[Unreleased]: https://github.com/Coysh/vibe-meetings/compare/v1.10.0...HEAD
 [1.10.0]: https://github.com/Coysh/vibe-meetings/compare/v1.9.1...v1.10.0
 [1.9.1]: https://github.com/Coysh/vibe-meetings/compare/v1.9.0...v1.9.1
 [1.9.0]: https://github.com/Coysh/vibe-meetings/compare/v1.8.0...v1.9.0
