@@ -34,7 +34,7 @@ struct RootView: View {
     var body: some View {
         observed
             .background {
-                // ⌥⌘F — search the meeting list (⌘F stays "find in this transcript").
+                // ⌥⌘F — search every meeting (⌘F stays "find in this transcript").
                 Button("Search meetings") { focusSearch() }
                     .keyboardShortcut("f", modifiers: [.command, .option])
                     .hidden()
@@ -76,7 +76,7 @@ struct RootView: View {
 
     /// The split view with its state wiring (routing requests, tree changes, the calendar loop).
     private var observed: some View {
-        splitView
+        routed
             .environment(library)
             .libraryActionSheets(library)
             .onAppear {
@@ -104,15 +104,17 @@ struct RootView: View {
                     sidebarItem = .allMeetings
                 }
             }
+    }
+
+    /// The split view, picking up requests from `AppRouter` (kept apart from `observed`
+    /// so neither chain is too long to type-check).
+    private var routed: some View {
+        splitView
             .onChange(of: env.appRouter.pendingNewMeeting) { consumeRouterRequests() }
             .onChange(of: env.appRouter.pendingPostRecording) { consumeRouterRequests() }
             .onChange(of: env.appRouter.selectMeetingID) { consumeRouterRequests() }
-            .onChange(of: env.appRouter.showTemplatesPage) {
-                if env.appRouter.showTemplatesPage {
-                    env.appRouter.showTemplatesPage = false
-                    sidebarItem = .templates
-                }
-            }
+            .onChange(of: env.appRouter.showTemplatesPage) { consumePageRequests() }
+            .onChange(of: env.appRouter.showSearchPage) { consumePageRequests() }
             .onChange(of: env.appRouter.pendingNewFolder) {
                 if env.appRouter.pendingNewFolder {
                     env.appRouter.pendingNewFolder = false
@@ -143,7 +145,7 @@ struct RootView: View {
                     .navigationTitle(windowTitle)
                     .id(currentItem) // a fresh page (scroll, search) per sidebar item — not on the stack itself
                     .navigationDestination(for: MeetingRoute.self) { route in
-                        MeetingDetailView(meetingID: route.id) { chatMeetingID in
+                        MeetingDetailView(meetingID: route.id, initialFocus: route.focus) { chatMeetingID in
                             chatFocusedMeetingID = chatMeetingID
                             showChatPanel = true
                         }
@@ -265,6 +267,8 @@ struct RootView: View {
             MeetingListView(scope: .inbox, upcoming: upcomingEvents, onRefreshCalendar: refreshCalendar) { open(meetingID: $0) }
         case .templates:
             TemplatesView()
+        case .search:
+            SearchView { path = [$0] }
         case .allMeetings:
             MeetingListView(scope: .all, upcoming: upcomingEvents, onRefreshCalendar: refreshCalendar) { open(meetingID: $0) }
         case .folder(let url):
@@ -284,6 +288,7 @@ struct RootView: View {
         case .home: return "Home"
         case .inbox: return "Inbox"
         case .templates: return "Templates"
+        case .search: return "Search"
         case .allMeetings: return "Meetings"
         case .folder(let url): return env.folderTree?.node(at: url)?.name ?? "Folder"
         }
@@ -304,7 +309,7 @@ struct RootView: View {
 
     private func currentPageLists(_ id: UUID) -> Bool {
         switch currentItem {
-        case .home, .allMeetings:
+        case .home, .allMeetings, .search:
             return true
         case .templates:
             return false
@@ -317,8 +322,22 @@ struct RootView: View {
 
     private func focusSearch() {
         path = []
-        if currentItem == .home { sidebarItem = .allMeetings }
+        sidebarItem = .search
         env.appRouter.pendingSearchFocus = true
+    }
+
+    /// Switches to a page another view asked for (Templates from a meeting, Search from a list).
+    private func consumePageRequests() {
+        let router = env.appRouter
+        if router.showTemplatesPage {
+            router.showTemplatesPage = false
+            sidebarItem = .templates
+        }
+        if router.showSearchPage {
+            router.showSearchPage = false
+            path = []
+            sidebarItem = .search
+        }
     }
 
     /// Moves app-level requests (from notifications, the menu bar, the

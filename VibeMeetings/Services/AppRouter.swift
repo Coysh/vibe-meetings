@@ -33,7 +33,10 @@ final class AppRouter {
     /// Open the Templates page (from a meeting's "+ Template" picker).
     var showTemplatesPage = false
 
-    /// Focus the meeting list's search field (⌥⌘F); consumed by the list once it's on screen.
+    /// Open the Search page (from a meeting list's search button).
+    var showSearchPage = false
+
+    /// Focus the Search page's field (⌥⌘F); consumed by the page once it's on screen.
     var pendingSearchFocus = false
 
     func requestNewFolder() {

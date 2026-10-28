@@ -40,6 +40,7 @@ struct SidebarView: View {
                 navRow("Home", systemImage: "house", item: .home)
                 navRow("Inbox", systemImage: "tray", item: .inbox, badge: inboxCount)
                 navRow("All meetings", systemImage: "rectangle.stack", item: .allMeetings)
+                navRow("Search", systemImage: "magnifyingglass", item: .search)
             }
 
             if !recent.isEmpty {

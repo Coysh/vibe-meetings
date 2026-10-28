@@ -24,6 +24,7 @@ final class AppEnvironment {
     let summaryService = SummaryGenerationService()
     let summaryTemplates = SummaryTemplateStore()
     let refinementService = TranscriptRefinementService()
+    let searchService = SearchService()
     let diarizationService = SpeakerDiarizationService()
     let updateChecker = UpdateChecker()
     let sparkleUpdater = SparkleUpdater()
@@ -86,7 +87,10 @@ final class AppEnvironment {
     /// views can read it without subscribing to the async stream themselves,
     /// and so that a refresh after folder creation lands before sheet dismissal.
     var folderTree: FolderNode? {
-        didSet { refinementService.syncImproved(from: folderTree) }
+        didSet {
+            refinementService.syncImproved(from: folderTree)
+            searchService.libraryChanged(tree: folderTree, root: rootURL)
+        }
     }
 
     /// Which summarization backend is active: "ollama", "openai" or "claude-code".

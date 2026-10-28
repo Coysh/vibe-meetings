@@ -74,47 +74,13 @@ public struct MeetingLibrary: Sendable {
     /// The transcript as utterances, from `segments.json`. Empty when there is none
     /// (e.g. some imported meetings only have `transcript.md`; see `markdownTranscript`).
     public func utterances(for entry: Entry, maxLineLength: Int = 1500) -> [Utterance] {
-        let url = MeetingFolder(url: entry.folderURL).segmentsURL
-        guard let data = try? Data(contentsOf: url), !data.isEmpty,
-              let segments = try? JSONDecoder().decode([LiteSegment].self, from: data) else { return [] }
-
-        let names = Dictionary(entry.meeting.participants.map { ($0.id, $0.displayName) }, uniquingKeysWith: { a, _ in a })
-        var out: [Utterance] = []
-        var current: (start: TimeInterval, speakerId: String, text: String)?
-        for seg in segments where !seg.isPartial {
-            let text = seg.text.trimmingCharacters(in: .whitespacesAndNewlines)
-            guard !text.isEmpty else { continue }
-            if var c = current, c.speakerId == seg.speakerId, c.text.count + text.count < maxLineLength {
-                c.text += " " + text
-                current = c
-            } else {
-                if let c = current {
-                    out.append(Utterance(start: c.start, speaker: names[c.speakerId] ?? c.speakerId.capitalized, text: c.text))
-                }
-                current = (seg.start, seg.speakerId, text)
-            }
-        }
-        if let c = current {
-            out.append(Utterance(start: c.start, speaker: names[c.speakerId] ?? c.speakerId.capitalized, text: c.text))
-        }
-        return out
+        TranscriptText.utterances(meeting: entry.meeting, folderURL: entry.folderURL, maxLineLength: maxLineLength)
+            .map { Utterance(start: $0.start, speaker: $0.speaker, text: $0.text) }
     }
 
     /// The "Full transcript" section of `transcript.md`, with the callout markup stripped.
     public func markdownTranscript(for entry: Entry) -> String? {
-        guard let md = readText(MeetingFolder(url: entry.folderURL).transcriptURL),
-              let range = md.range(of: "## Full transcript") else { return nil }
-        let lines = md[range.upperBound...]
-            .split(separator: "\n", omittingEmptySubsequences: false)
-            .map { line -> Substring in
-                var l = line
-                if l.hasPrefix(">") { l = l.dropFirst() }
-                if l.hasPrefix(" ") { l = l.dropFirst() }
-                return l
-            }
-            .filter { !$0.hasPrefix("[!note]") && !$0.hasPrefix("Speaker labels are placeholders") }
-        let text = lines.joined(separator: "\n").trimmingCharacters(in: .whitespacesAndNewlines)
-        return text.isEmpty ? nil : text
+        TranscriptText.markdownTranscript(folderURL: entry.folderURL)
     }
 
     // MARK: - helpers
@@ -128,22 +94,11 @@ public struct MeetingLibrary: Sendable {
     }
 
     private func readText(_ url: URL) -> String? {
-        guard let text = try? String(contentsOf: url, encoding: .utf8) else { return nil }
-        let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
-        return trimmed.isEmpty ? nil : trimmed
+        TranscriptText.readText(url)
     }
 
     private func nonEmptyFile(_ url: URL) -> Bool {
         let size = (try? url.resourceValues(forKeys: [.fileSizeKey]).fileSize) ?? 0
         return size > 0
     }
-}
-
-/// `TranscriptSegment` without the per-word timings, which are most of the file
-/// and which the tools never use.
-private struct LiteSegment: Decodable {
-    let speakerId: String
-    let start: TimeInterval
-    let text: String
-    let isPartial: Bool
 }

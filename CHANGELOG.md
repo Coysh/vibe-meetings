@@ -9,6 +9,12 @@ versioned with [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 ### Added
 - **Ask Claude about your meetings.** Vibe Meetings now includes an MCP server, so Claude Desktop and Claude Code can list, search and read your meetings: titles, dates, attendees, summaries, notes and timestamped transcripts. It's read-only and reads the library folder directly, so it works whether or not the app is open. Settings → Claude has the one-line setup for each. Under the hood it's the app itself run as `vibe-meetings --mcp`
 - **…and from claude.ai on the web and your phone.** Turn on remote access in Settings → Claude and the app serves the same read-only tools to Claude's custom connectors while it's open. It listens on this Mac only (127.0.0.1); a Cloudflare Tunnel gives it a public address, and the settings show the exact command. Connecting means signing in on a Vibe Meetings page with a single-use pairing code shown in the app (five wrong guesses lock it for 15 minutes). Connected apps are listed there and can be disconnected one by one or all at once. Sign-ins survive restarts; only hashes of the access tokens are stored, in `~/Library/Application Support/vibe-meetings/mcp-oauth.json`
+- **Search every meeting.** A new Search page (sidebar, or ⌥⌘F from anywhere) finds words in titles and attendees, summaries, notes, template write-ups and transcripts, using the improved transcript once a meeting has one. Results are ranked, and each meeting shows its best matching passages with the words picked out; clicking a transcript passage opens the meeting on that line with the find bar filled in. "signed" also finds "sign" and "signing", a phrase in "quotes" matches exactly, `-word` leaves meetings with that word out, and the last word matches as you type. Each word can be anywhere in the meeting, so "Priya budget" finds the call Priya attended where the budget came up
+- **Search filters:** date (past week, month, 3 months, this year, or a custom range), folder (including its subfolders), people, organisation, 1:1 or group, labels, improved transcripts only, where to look (titles, summaries, notes, write-ups, transcripts) and who said it. With no words typed, the filters alone list the matching meetings, newest first. Sort by best match or newest
+- The search index is a cache in `~/Library/Application Support/VibeMeetings/search-index.sqlite`; your meetings folder stays plain files. It's built in the background on first launch (about 5 seconds for 250 meetings) and kept up to date a moment after anything changes: a new recording, an improved transcript, a summary, a renamed speaker, a moved or deleted meeting
+
+### Changed
+- The search box on meeting lists has gone: it re-read every meeting's files on each keystroke. The magnifier there now opens the Search page, limited to the folder you were in
 
 ## [1.10.0] - 2026-10-25
 ### Added
@@ -269,7 +275,8 @@ versioned with [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - Microphone device selection in Settings
 - Resume recording for existing meetings
 
-[Unreleased]: https://github.com/Coysh/vibe-meetings/compare/v1.10.0...HEAD
+[Unreleased]: https://github.com/Coysh/vibe-meetings/compare/v1.11.0...HEAD
+[1.11.0]: https://github.com/Coysh/vibe-meetings/compare/v1.10.0...v1.11.0
 [1.10.0]: https://github.com/Coysh/vibe-meetings/compare/v1.9.1...v1.10.0
 [1.9.1]: https://github.com/Coysh/vibe-meetings/compare/v1.9.0...v1.9.1
 [1.9.0]: https://github.com/Coysh/vibe-meetings/compare/v1.8.0...v1.9.0

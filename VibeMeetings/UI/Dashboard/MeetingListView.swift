@@ -52,6 +52,11 @@ struct MeetingListView: View {
         /// Meetings not filed in any folder.
         case inbox
         case folder(URL)
+
+        var isFolder: Bool {
+            if case .folder = self { return true }
+            return false
+        }
     }
 
     let scope: Scope
@@ -69,13 +74,7 @@ struct MeetingListView: View {
     @State private var selection: Set<UUID> = []
     /// "Select" mode: rows get checkboxes and a click ticks a meeting instead of opening it.
     @State private var isSelecting = false
-    @State private var isSearchOpen = false
-    @State private var searchText = ""
-    @State private var contentMatchIDs: Set<UUID> = []
-    @State private var isSearchingContent = false
-    @State private var searchTask: Task<Void, Never>?
     @State private var pageWidth: CGFloat = 0
-    @FocusState private var searchFocused: Bool
 
     /// Side margin that centres the content at the reading width in a wide window.
     private var pageMargin: CGFloat {
@@ -86,7 +85,6 @@ struct MeetingListView: View {
         VStack(spacing: 0) {
             VStack(alignment: .leading, spacing: Tokens.Space.l) {
                 header
-                if isSearchOpen { searchField }
                 selectionBar
                 ImproveProgressBanner()
                 nextUp
@@ -102,16 +100,10 @@ struct MeetingListView: View {
         .floatingActionBar()
         .onGeometryChange(for: CGFloat.self) { $0.size.width } action: { pageWidth = $0 }
         .task(id: env.folderTree.map { ObjectIdentifier($0) }) { rebuildIndex() }
-        .onChange(of: searchText) {
-            rebuildSections()
-            debounceContentSearch()
-        }
-        .onChange(of: env.appRouter.pendingSearchFocus) { consumeSearchRequest() }
         // Once the run starts, the banner shows its progress; leave select mode.
         .onChange(of: env.refinementService.bulk != nil) { _, running in
             if running { endSelecting() }
         }
-        .onAppear { consumeSearchRequest() }
     }
 
     // MARK: - Header
@@ -136,15 +128,13 @@ struct MeetingListView: View {
             HStack(spacing: Tokens.Space.m) {
                 RecordingQuickSettingsButton()
 
-                Button {
-                    if isSearchOpen { closeSearch() } else { openSearch() }
-                } label: {
+                Button(action: openSearch) {
                     Image(systemName: "magnifyingglass")
                         .font(.system(size: 15, weight: .medium))
-                        .foregroundStyle(isSearchOpen ? Color.accentColor : .secondary)
+                        .foregroundStyle(.secondary)
                 }
                 .buttonStyle(.plain)
-                .help("Search meetings (⌥⌘F)")
+                .help(scope.isFolder ? "Search this folder (⌥⌘F searches everything)" : "Search meetings (⌥⌘F)")
                 .accessibilityLabel("Search meetings")
 
                 Button {
@@ -172,7 +162,7 @@ struct MeetingListView: View {
 
     // MARK: - Select mode
 
-    /// The meetings on screen (respecting the search) whose transcript hasn't been improved and could be.
+    /// The meetings on screen whose transcript hasn't been improved and could be.
     private var notImprovedIDs: Set<UUID> {
         Set(sections.lazy.flatMap(\.items)
             .filter { $0.meeting.hasAudio && $0.meeting.endedAt != nil && !env.refinementService.isImproved($0.id) }
@@ -228,33 +218,10 @@ struct MeetingListView: View {
         if selection.contains(id) { selection.remove(id) } else { selection.insert(id) }
     }
 
-    private var searchField: some View {
-        HStack(spacing: 8) {
-            Image(systemName: "magnifyingglass").foregroundStyle(.secondary)
-            TextField("Search titles, people and transcripts…", text: $searchText)
-                .textFieldStyle(.plain)
-                .focused($searchFocused)
-                .accessibilityLabel("Search meetings")
-                .onExitCommand { closeSearch() }
-            if isSearchingContent {
-                ProgressView().controlSize(.mini)
-                    .help("Searching transcripts and summaries…")
-            }
-            Button(action: closeSearch) {
-                Image(systemName: "xmark.circle.fill").foregroundStyle(.secondary)
-            }
-            .buttonStyle(.plain)
-            .accessibilityLabel("Close search")
-        }
-        .padding(10)
-        .background(Tokens.raised, in: RoundedRectangle(cornerRadius: Tokens.Radius.row, style: .continuous))
-        .overlay(RoundedRectangle(cornerRadius: Tokens.Radius.row, style: .continuous).strokeBorder(Tokens.stroke))
-    }
-
     /// The calendar events that haven't finished — only on the all-meetings page.
     @ViewBuilder
     private var nextUp: some View {
-        if scope == .all, !isSearching {
+        if scope == .all {
             NextUpSection(events: upcoming, onRefresh: onRefreshCalendar)
         }
     }
@@ -272,8 +239,6 @@ struct MeetingListView: View {
                 Button("Start Recording") { env.appRouter.requestNewMeeting() }
                     .buttonStyle(.capsule(.primary))
             }
-        } else if sections.isEmpty {
-            ContentUnavailableView.search(text: searchText)
         } else {
             list
         }
@@ -401,8 +366,7 @@ struct MeetingListView: View {
     }
 
     private func rebuildSections() {
-        let visible = isSearching ? items.filter(matchesSearch) : items
-        sections = Self.group(visible)
+        sections = Self.group(items)
     }
 
     /// `items` is newest first, so consecutive meetings on the same day share a section.
@@ -440,81 +404,13 @@ struct MeetingListView: View {
 
     // MARK: - Search
 
-    private var query: String {
-        searchText.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
-    }
-
-    private var isSearching: Bool { !query.isEmpty }
-
-    private func matchesSearch(_ item: MeetingItem) -> Bool {
-        let meeting = item.meeting
-        let q = query
-        if meeting.title.lowercased().contains(q) { return true }
-        if meeting.attendees?.contains(where: { $0.lowercased().contains(q) }) == true { return true }
-        if meeting.participants.contains(where: { $0.displayName.lowercased().contains(q) }) { return true }
-        if meeting.org?.lowercased().contains(q) == true { return true }
-        return contentMatchIDs.contains(meeting.id)
-    }
-
+    /// Opens the Search page; from a folder, it's limited to that folder.
     private func openSearch() {
-        isSearchOpen = true
-        Task { @MainActor in searchFocused = true }
-    }
-
-    private func closeSearch() {
-        isSearchOpen = false
-        searchFocused = false
-        searchTask?.cancel()
-        searchText = ""
-        contentMatchIDs.removeAll()
-        isSearchingContent = false
-    }
-
-    private func consumeSearchRequest() {
-        guard env.appRouter.pendingSearchFocus else { return }
-        env.appRouter.pendingSearchFocus = false
-        openSearch()
-    }
-
-    private func debounceContentSearch() {
-        searchTask?.cancel()
-        let currentQuery = query
-        guard !currentQuery.isEmpty else {
-            contentMatchIDs.removeAll()
-            isSearchingContent = false
-            return
+        if case .folder(let url) = scope, let root = env.folderTree {
+            env.searchService.scope(toFolder: root.node(at: url)?.displayPath(relativeTo: root.url))
         }
-        searchTask = Task {
-            try? await Task.sleep(for: .milliseconds(300))
-            guard !Task.isCancelled else { return }
-            isSearchingContent = true
-            let matches = await searchContent(query: currentQuery)
-            guard !Task.isCancelled else { return }
-            contentMatchIDs = matches
-            isSearchingContent = false
-            rebuildSections()
-        }
-    }
-
-    /// Meetings whose summary or transcript mentions `query` (titles are matched in memory).
-    private func searchContent(query: String) async -> Set<UUID> {
-        var matches = Set<UUID>()
-        for item in items {
-            if Task.isCancelled { break }
-            let meeting = item.meeting
-            // Already matched by title — skip the disk read.
-            if meeting.title.lowercased().contains(query) { continue }
-            if let summary = try? await env.meetingStore.loadSummary(for: meeting.id),
-               summary.lowercased().contains(query) {
-                matches.insert(meeting.id)
-                continue
-            }
-            if let segments = try? await env.meetingStore.loadTranscript(for: meeting.id),
-               segments.contains(where: { $0.text.lowercased().contains(query) }) {
-                matches.insert(meeting.id)
-            }
-        }
-        return matches
+        env.appRouter.pendingSearchFocus = true
+        env.appRouter.showSearchPage = true
     }
 }
 
