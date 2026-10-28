@@ -6,6 +6,8 @@ import VMSummarization
 
 struct MeetingDetailView: View {
     let meetingID: UUID
+    /// Where to open it, e.g. at a search hit; otherwise Summary (Transcript while recording).
+    var initialFocus: MeetingFocus? = nil
     var onOpenChat: ((UUID) -> Void)? = nil
     @Environment(AppEnvironment.self) private var env
     @Environment(LibraryActions.self) private var library
@@ -61,6 +63,22 @@ struct MeetingDetailView: View {
 
         var id: Self { self }
         static let base: [Tab] = [.summary, .transcript, .notes, .audio]
+    }
+
+    /// The tab `initialFocus` asks for, if this meeting has it.
+    private var focusedTab: Tab? {
+        switch initialFocus {
+        case .summary?: .summary
+        case .notes?: .notes
+        case .template(let id)?: openTemplateIDs.contains(id) ? .template(id) : nil
+        case .transcript?: .transcript
+        case nil: nil
+        }
+    }
+
+    private var transcriptJump: TranscriptJump? {
+        if case .transcript(let jump)? = initialFocus { return jump }
+        return nil
     }
 
     private var tabs: [Tab] {
@@ -146,7 +164,8 @@ struct MeetingDetailView: View {
                                     segments: .constant(displaySegments),
                                     participants: handle.meeting.participants,
                                     meeting: handle.meeting,
-                                    isSearching: $isSearchingTranscript
+                                    isSearching: $isSearchingTranscript,
+                                    jump: transcriptJump
                                 )
                             } else {
                                 if env.diarizationService.job(for: meetingID) != nil {
@@ -171,7 +190,8 @@ struct MeetingDetailView: View {
                                             }
                                         }
                                     },
-                                    onRenameSpeaker: { speakerID, name in renameSpeaker(speakerID, to: name) }
+                                    onRenameSpeaker: { speakerID, name in renameSpeaker(speakerID, to: name) },
+                                    jump: transcriptJump
                                 )
                             }
                         }
@@ -1188,10 +1208,11 @@ struct MeetingDetailView: View {
             loadTemplateOutputs()
 
             // Default to Summary when opening a past meeting; while a meeting is
-            // still recording live, Transcript is the useful view.
+            // still recording live, Transcript is the useful view. A search hit
+            // opens where it matched.
             if !didChooseInitialTab {
                 didChooseInitialTab = true
-                selectedTab = isLiveRecording ? .transcript : .summary
+                selectedTab = focusedTab ?? (isLiveRecording ? .transcript : .summary)
             }
         } catch {
             env.presentError(error, while: "open this meeting")

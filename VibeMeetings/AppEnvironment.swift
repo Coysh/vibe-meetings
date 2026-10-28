@@ -24,6 +24,7 @@ final class AppEnvironment {
     let summaryService = SummaryGenerationService()
     let summaryTemplates = SummaryTemplateStore()
     let refinementService = TranscriptRefinementService()
+    let searchService = SearchService()
     let diarizationService = SpeakerDiarizationService()
     let updateChecker = UpdateChecker()
     let sparkleUpdater = SparkleUpdater()
@@ -47,6 +48,8 @@ final class AppEnvironment {
     @ObservationIgnored let presenter = MainWindowPresenter()
     @ObservationIgnored let eventReminders: EventReminderScheduler
     @ObservationIgnored private(set) lazy var recordingService = RecordingSessionService(env: self)
+    /// Remote MCP access for claude.ai (Settings → Claude). Observable itself.
+    @ObservationIgnored private(set) lazy var remoteMCP = RemoteMCPService(rootURL: rootURL)
     @ObservationIgnored private var overlay: RecordingOverlayController?
     @ObservationIgnored private var treeTask: Task<Void, Never>?
     @ObservationIgnored private var bootstrapped = false
@@ -84,7 +87,10 @@ final class AppEnvironment {
     /// views can read it without subscribing to the async stream themselves,
     /// and so that a refresh after folder creation lands before sheet dismissal.
     var folderTree: FolderNode? {
-        didSet { refinementService.syncImproved(from: folderTree) }
+        didSet {
+            refinementService.syncImproved(from: folderTree)
+            searchService.libraryChanged(tree: folderTree, root: rootURL)
+        }
     }
 
     /// Which summarization backend is active: "ollama", "openai" or "claude-code".
@@ -348,29 +354,10 @@ final class AppEnvironment {
 
     init() throws {
         let defaults = UserDefaults.standard
-        let rootKey = "VibeMeetings.RootURL.bookmark"
         let modelKey = "VibeMeetings.SelectedTranscriptionModelId"
         let ollamaModelKey = "VibeMeetings.SelectedOllamaModelId"
 
-        let homeDir = FileManager.default.homeDirectoryForCurrentUser
-        let defaultRoot = homeDir.appendingPathComponent("MeetingNotes")
-
-        let resolvedRoot: URL
-        if let bookmark = defaults.data(forKey: rootKey) {
-            var stale = false
-            if let resolved = try? URL(
-                resolvingBookmarkData: bookmark,
-                options: [.withSecurityScope],
-                relativeTo: nil,
-                bookmarkDataIsStale: &stale
-            ) {
-                resolvedRoot = resolved
-            } else {
-                resolvedRoot = defaultRoot
-            }
-        } else {
-            resolvedRoot = defaultRoot
-        }
+        let resolvedRoot = Self.resolveLibraryRoot(defaults: defaults)
 
         self.rootURL = resolvedRoot
 
@@ -426,7 +413,7 @@ final class AppEnvironment {
             self.hasCompletedOnboarding = stored
         } else {
             let existingInstall = AVCaptureDevice.authorizationStatus(for: .audio) != .notDetermined
-                || defaults.data(forKey: "VibeMeetings.RootURL.bookmark") != nil
+                || defaults.data(forKey: Self.rootBookmarkKey) != nil
             self.hasCompletedOnboarding = existingInstall
             defaults.set(existingInstall, forKey: Self.onboardingKey)
         }
@@ -479,6 +466,7 @@ final class AppEnvironment {
         )
 
         startTreeSubscription()
+        remoteMCP.startIfEnabled()
 
         let overlay = RecordingOverlayController(env: self)
         overlay.start()
@@ -523,9 +511,26 @@ final class AppEnvironment {
         self.rootURL = url
         self.meetingStore = try FilesystemMeetingStore(rootURL: url)
         if bootstrapped { startTreeSubscription() }
+        remoteMCP.setRoot(url)
         if let bookmark = try? url.bookmarkData(options: [.withSecurityScope], includingResourceValuesForKeys: nil, relativeTo: nil) {
-            UserDefaults.standard.set(bookmark, forKey: "VibeMeetings.RootURL.bookmark")
+            UserDefaults.standard.set(bookmark, forKey: Self.rootBookmarkKey)
         }
+    }
+
+    nonisolated private static let rootBookmarkKey = "VibeMeetings.RootURL.bookmark"
+
+    /// The library folder the user chose (saved as a bookmark), or ~/MeetingNotes.
+    /// Shared with `--mcp` mode, which runs this binary without an environment.
+    nonisolated static func resolveLibraryRoot(defaults: UserDefaults = .standard) -> URL {
+        let defaultRoot = FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent("MeetingNotes")
+        guard let bookmark = defaults.data(forKey: rootBookmarkKey) else { return defaultRoot }
+        var stale = false
+        return (try? URL(
+            resolvingBookmarkData: bookmark,
+            options: [.withSecurityScope],
+            relativeTo: nil,
+            bookmarkDataIsStale: &stale
+        )) ?? defaultRoot
     }
 
     /// Update the selected microphone device and persist.

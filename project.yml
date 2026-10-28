@@ -26,6 +26,8 @@ packages:
     path: Packages/VMTranscription
   VMSummarization:
     path: Packages/VMSummarization
+  VMMCP:
+    path: Packages/VMMCP
   VMStorage:
     path: Packages/VMStorage
   VMCalendar:
@@ -72,5 +74,6 @@ targets:
       - package: VMRecording
       - package: VMTranscription
       - package: VMSummarization
+      - package: VMMCP
       - package: VMStorage
       - package: VMCalendar

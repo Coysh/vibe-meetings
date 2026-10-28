@@ -10,6 +10,8 @@ struct TranscriptView: View {
     var onSave: (([TranscriptSegment]) -> Void)? = nil
     /// Rename a speaker for this meeting (e.g. "Others" → "Priya").
     var onRenameSpeaker: ((_ speakerID: String, _ newName: String) -> Void)? = nil
+    /// A search hit to open at: scrolls to that line and fills the find bar. Used once.
+    var jump: TranscriptJump? = nil
     @State private var copied = false
     @State private var pendingDeleteID: UUID?
     @State private var renameSpeakerID: String?
@@ -18,6 +20,9 @@ struct TranscriptView: View {
     @State private var matchOrder: [UUID] = []
     @State private var matchCursor = 0
     @State private var searchText = ""
+    @State private var didJump = false
+    /// The line `jump` resolved to, for the find bar to start at instead of the first match.
+    @State private var jumpTarget: UUID?
     @State private var isEditing = false
     @State private var editingSegmentID: UUID? = nil
     @State private var editText = ""
@@ -219,8 +224,25 @@ struct TranscriptView: View {
                 }
                 .onChange(of: searchText) {
                     recomputeMatches()
-                    matchCursor = 0
-                    if let first = matchOrder.first { withAnimation { proxy.scrollTo(first, anchor: .center) } }
+                    if let target = jumpTarget {
+                        jumpTarget = nil
+                        matchCursor = matchOrder.firstIndex(of: target) ?? 0
+                        proxy.scrollTo(target, anchor: .center)
+                    } else {
+                        matchCursor = 0
+                        if let first = matchOrder.first { withAnimation { proxy.scrollTo(first, anchor: .center) } }
+                    }
+                }
+                .task(id: segments.isEmpty) {
+                    guard let jump, !didJump, let target = segmentID(for: jump) else { return }
+                    didJump = true
+                    if jump.find.isEmpty {
+                        proxy.scrollTo(target, anchor: .center)
+                    } else {
+                        jumpTarget = target
+                        isSearching = true
+                        searchText = jump.find
+                    }
                 }
                 .onChange(of: segments) { if isSearching { recomputeMatches() } }
                 .onChange(of: matchCursor) {
@@ -393,6 +415,20 @@ struct TranscriptView: View {
             .filter { !$0.isEmpty && $0.lowercased() != "you" && !used.contains($0.lowercased()) }
             .prefix(3)
             .map { $0 }
+    }
+
+    /// The line a search hit points at: the segment holding the matched words, from the
+    /// hit's line (which may span several segments) on; else the closest start time.
+    private func segmentID(for jump: TranscriptJump) -> UUID? {
+        guard !segments.isEmpty else { return nil }
+        let startIndex = jump.segmentID.flatMap { id in segments.firstIndex { $0.id == id } }
+            ?? jump.start.flatMap { start in
+                segments.indices.min { abs(segments[$0].start - start) < abs(segments[$1].start - start) }
+            }
+        guard let startIndex else { return nil }
+        let find = jump.find.lowercased()
+        let line = segments[startIndex...].prefix(40)
+        return (find.isEmpty ? nil : line.first { $0.text.lowercased().contains(find) }?.id) ?? segments[startIndex].id
     }
 
     private func stepMatch(_ delta: Int) {
