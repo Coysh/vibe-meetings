@@ -18,6 +18,7 @@ struct SettingsView: View {
             CalendarSettingsView().tabItem { Label("Calendar", systemImage: "calendar") }
             NotificationSettingsView().tabItem { Label("Notifications", systemImage: "bell") }
             PromptSettingsView().tabItem { Label("Prompts", systemImage: "text.quote") }
+            ConnectionsSettingsView().tabItem { Label("Claude", systemImage: "link") }
         }
         // Resizable (see `.windowResizability` on the Settings scene); every
         // tab scrolls, so long lists like calendars are never cut off.

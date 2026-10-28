@@ -1,7 +1,34 @@
 import SwiftUI
 import UserNotifications
+import VMMCP
 
+/// `vibe-meetings --mcp [--root <folder>]` serves the meeting library to MCP
+/// clients (Claude Desktop, Claude Code) over stdio and exits when the client
+/// disconnects. It returns before SwiftUI starts, so none of the app runs:
+/// no window, Dock icon, recording, recovery or update checks.
 @main
+enum AppMain {
+    static func main() {
+        let arguments = CommandLine.arguments
+        guard arguments.contains("--mcp") else {
+            VibeMeetingsApp.main()
+            return
+        }
+        let root: URL
+        if let i = arguments.firstIndex(of: "--root"), i + 1 < arguments.count {
+            root = URL(fileURLWithPath: (arguments[i + 1] as NSString).expandingTildeInPath)
+        } else {
+            root = AppEnvironment.resolveLibraryRoot()
+        }
+        let scoped = root.startAccessingSecurityScopedResource()
+        defer { if scoped { root.stopAccessingSecurityScopedResource() } }
+
+        let version = Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "dev"
+        StdioTransport.log("serving \(root.path)")
+        StdioTransport(server: MCPServer(library: MeetingLibrary(root: root), serverVersion: version)).run()
+    }
+}
+
 struct VibeMeetingsApp: App {
     @NSApplicationDelegateAdaptor private var appDelegate: AppDelegate
 
