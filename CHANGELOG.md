@@ -6,6 +6,8 @@ Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 versioned with [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
+
+## [1.11.0] - 2026-10-28
 ### Added
 - **Ask Claude about your meetings.** Vibe Meetings now includes an MCP server, so Claude Desktop and Claude Code can list, search and read your meetings: titles, dates, attendees, summaries, notes and timestamped transcripts. It's read-only and reads the library folder directly, so it works whether or not the app is open. Settings → Claude has the one-line setup for each. Under the hood it's the app itself run as `vibe-meetings --mcp`
 - **…and from claude.ai on the web and your phone.** Turn on remote access in Settings → Claude and the app serves the same read-only tools to Claude's custom connectors while it's open. It listens on this Mac only (127.0.0.1); a Cloudflare Tunnel gives it a public address, and the settings show the exact command. Connecting means signing in on a Vibe Meetings page with a single-use pairing code shown in the app (five wrong guesses lock it for 15 minutes). Connected apps are listed there and can be disconnected one by one or all at once. Sign-ins survive restarts; only hashes of the access tokens are stored, in `~/Library/Application Support/vibe-meetings/mcp-oauth.json`
@@ -15,6 +17,7 @@ versioned with [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Changed
 - The search box on meeting lists has gone: it re-read every meeting's files on each keystroke. The magnifier there now opens the Search page, limited to the folder you were in
+
 
 ## [1.10.0] - 2026-10-25
 ### Added
