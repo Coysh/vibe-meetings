@@ -4,6 +4,14 @@
         <title>VibeMeetings Updates</title>
         <language>en</language>
         <item>
+            <title>1.11.1</title>
+            <pubDate>Tue, 10 Nov 2026 17:43:44 +0000</pubDate>
+            <sparkle:version>202611101707</sparkle:version>
+            <sparkle:shortVersionString>1.11.1</sparkle:shortVersionString>
+            <sparkle:minimumSystemVersion>15.0</sparkle:minimumSystemVersion>
+            <enclosure url="https://github.com/Coysh/vibe-meetings/releases/download/v1.11.1/VibeMeetings.zip" length="16172570" type="application/octet-stream" sparkle:edSignature="klBShKONJuppMIuWUHdSn8a5hXgK/mWq9+YCDK/Ho9VpOzWeMGLyhrMp6ytD0uAz8UtxzeZ9iEr4rv3Xt/UEAw=="/>
+        </item>
+        <item>
             <title>1.11.0</title>
             <pubDate>Wed, 28 Oct 2026 22:38:25 +0000</pubDate>
             <sparkle:version>202610282211</sparkle:version>
