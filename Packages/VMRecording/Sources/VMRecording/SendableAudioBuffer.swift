@@ -18,8 +18,12 @@ import AVFoundation
 /// callback, which makes the cross-actor hop race-free in practice.
 public struct SendableAudioBuffer: @unchecked Sendable {
     public let buffer: AVAudioPCMBuffer
+    /// Host time (mach ticks) at which the buffer's first sample was captured,
+    /// when the source reports one. Lets the writer notice gaps in a channel.
+    public let hostTime: UInt64?
 
-    public init(_ buffer: AVAudioPCMBuffer) {
+    public init(_ buffer: AVAudioPCMBuffer, hostTime: UInt64? = nil) {
         self.buffer = buffer
+        self.hostTime = hostTime
     }
 }

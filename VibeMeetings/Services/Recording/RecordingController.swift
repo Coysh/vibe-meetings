@@ -185,6 +185,14 @@ final class RecordingController {
             enabled: env.echoCancellationEnabled,
             debugWAVURL: env.saveEchoCancelledMic ? handle.folderURL.appendingPathComponent("mic-aec.wav") : nil
         )
+        // The capture engine restarts itself when the system changes audio devices; if
+        // that isn't getting audio back, say so once instead of recording silence.
+        let presenter = self.env
+        coordinator.setMicUnresponsiveHandler {
+            Task { @MainActor in
+                presenter.presentError(MicUnresponsiveError(), while: "record the microphone")
+            }
+        }
         do {
             try await coordinator.start(writingAudioTo: audioURL, micDeviceID: micID)
         } catch {
@@ -449,5 +457,13 @@ extension JSONEncoder {
         let e = JSONEncoder()
         e.outputFormatting = [.prettyPrinted, .sortedKeys]
         return e
+    }
+}
+
+/// Shown when the microphone has been silent for several seconds despite automatic reconnection.
+private struct MicUnresponsiveError: LocalizedError {
+    var errorDescription: String? {
+        "The microphone stopped responding and vibe-meetings is still trying to reconnect it. "
+        + "The recording continues; the other side is still being captured."
     }
 }

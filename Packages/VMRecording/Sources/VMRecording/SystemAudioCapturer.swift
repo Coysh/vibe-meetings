@@ -191,7 +191,7 @@ public final class SystemAudioCapturer: @unchecked Sendable {
                 }
             }
 
-            self.bufferContinuation.yield(SendableAudioBuffer(pcm))
+            self.bufferContinuation.yield(SendableAudioBuffer(pcm, hostTime: capturedHostTime))
             let samples = (try? self.converter.convert(pcm)) ?? []
             if !samples.isEmpty {
                 let ts = MicrophoneCapturer.hostTime(capturedHostTime) - capturedEpoch

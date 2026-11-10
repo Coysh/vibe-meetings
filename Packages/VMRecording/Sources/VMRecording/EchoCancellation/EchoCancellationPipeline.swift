@@ -47,6 +47,9 @@ public struct EchoCancellationStats: Sendable, Codable, Equatable {
     /// Seconds of audio processed in each mode.
     public var activeSeconds: Double = 0
     public var bypassSeconds: Double = 0
+    /// Times the microphone capture engine was restarted after the system changed audio
+    /// devices (or it stalled). Optional so older aec-stats.json files still decode.
+    public var micRestarts: Int?
 
     public init() {}
 }

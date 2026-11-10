@@ -6,6 +6,10 @@ Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 versioned with [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
+### Fixed
+- **The microphone going silent part-way through a Teams meeting.** When Teams switches the Mac's sound output (it does this when someone shares their screen, and again afterwards), macOS stops the app's microphone capture, and nothing started it again: the rest of the recording had your side silent while the other side carried on. Across four recordings on one day the mic channel went dead at the exact moment Teams changed the output device. The microphone now restarts itself within a second of any output or device change, finds your chosen mic again even if macOS has renumbered it, keeps retrying if the first attempt fails, and a watchdog restarts it if it ever goes quiet without any notice. If it still can't get audio back after about ten seconds you're told once; the recording carries on either way
+- The saved audio keeps your channel in step with the other side's across a gap: the silent stretch is filled in rather than everything after it shifting earlier. While the mic is silent the file keeps being written, so a long stall no longer holds the other side's audio in memory until the end
+- The echo canceller starts afresh after the microphone restarts, and `aec-stats.json` records how many times that happened (`micRestarts`)
 
 ## [1.11.0] - 2026-10-28
 ### Added
@@ -279,6 +283,7 @@ versioned with [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - Resume recording for existing meetings
 
 [Unreleased]: https://github.com/Coysh/vibe-meetings/compare/v1.11.0...HEAD
+[1.11.1]: https://github.com/Coysh/vibe-meetings/compare/v1.11.0...v1.11.1
 [1.11.0]: https://github.com/Coysh/vibe-meetings/compare/v1.10.0...v1.11.0
 [1.10.0]: https://github.com/Coysh/vibe-meetings/compare/v1.9.1...v1.10.0
 [1.9.1]: https://github.com/Coysh/vibe-meetings/compare/v1.9.0...v1.9.1
