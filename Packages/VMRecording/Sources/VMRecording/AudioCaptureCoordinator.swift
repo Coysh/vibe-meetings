@@ -63,7 +63,20 @@ public actor AudioCaptureCoordinator: AudioCaptureService {
     }
 
     /// Live echo-cancellation diagnostics; `nil` when cancellation isn't running.
-    public nonisolated var echoStats: EchoCancellationStats? { _echo.pipeline?.stats }
+    public nonisolated var echoStats: EchoCancellationStats? {
+        guard var stats = _echo.pipeline?.stats else { return nil }
+        stats.micRestarts = mic.restartCount
+        return stats
+    }
+
+    /// Times the mic engine was restarted automatically (device change, stall).
+    public nonisolated var micRestartCount: Int { mic.restartCount }
+
+    /// Called (on an arbitrary thread) once when the mic has delivered nothing
+    /// for about ten seconds despite restart attempts. Set before `start`.
+    public nonisolated func setMicUnresponsiveHandler(_ handler: (@Sendable () -> Void)?) {
+        mic.onUnresponsive = handler
+    }
 
     /// Whether the system-audio tap (the "Others" channel) is capturing. `false`
     /// before `start`, and after a start where the tap failed (usually the
@@ -86,6 +99,18 @@ public actor AudioCaptureCoordinator: AudioCaptureService {
 
         startEpoch = MicrophoneCapturer.nowHostSeconds()
         _echo.micDeviceID = micDeviceID
+
+        // After the capture engine restarts (the system changed audio devices), the
+        // echo canceller's alignment and filter are stale: start them afresh.
+        mic.onRestart = { [weak self] reason in
+            guard let self else { return }
+            print("[Coordinator] mic restarted (\(reason)); resetting echo canceller")
+            self._echo.pipeline?.resetForDeviceChange()
+            self._echo.pipeline?.setDeviceNames(
+                mic: Self.micName(for: self._echo.micDeviceID),
+                output: AudioDeviceEnumerator.defaultOutputDeviceName()
+            )
+        }
 
         print("[Coordinator] starting mic, deviceID=\(String(describing: micDeviceID))")
         do {

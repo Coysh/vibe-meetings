@@ -21,6 +21,7 @@ public final class DualChannelM4AWriter: @unchecked Sendable {
     private var micHasData = false
     private var sysHasData = false
     private var flushCount = 0
+    private var micGapFiller = MicGapFiller()
 
     private let micConverter = AudioFormatConverter48kMono()
     private let sysConverter = AudioFormatConverter48kMono()
@@ -65,8 +66,16 @@ public final class DualChannelM4AWriter: @unchecked Sendable {
     public func appendMic(_ wrapper: SendableAudioBuffer) {
         let buffer = wrapper.buffer
         guard let samples = try? micConverter.convert(buffer) else { return }
+        let hostSeconds = wrapper.hostTime.map { MicrophoneCapturer.hostTime($0) }
         queue.async {
             self.micHasData = true
+            // If the mic went quiet and came back (capture engine restarted),
+            // fill the hole so the channel stays aligned with the system audio.
+            let gap = self.micGapFiller.silenceToInsert(hostSeconds: hostSeconds, frames: samples.count)
+            if gap > 0 {
+                self.micBuffer.append(contentsOf: repeatElement(0, count: gap))
+                print("[M4AWriter] mic resumed after a gap; inserted \(gap) frames of silence")
+            }
             self.micBuffer.append(contentsOf: samples)
             self.flushIfReady()
         }
@@ -83,6 +92,14 @@ public final class DualChannelM4AWriter: @unchecked Sendable {
     }
 
     private func flushIfReady() {
+        // The mic stopped delivering while the system channel carries on: top
+        // it up with silence so the file (and its crash-safe WAV) keep being
+        // written and the system audio doesn't pile up in memory.
+        if micHasData && sysHasData {
+            let pad = micGapFiller.stallPadding(micFrames: micBuffer.count, systemFrames: sysBuffer.count)
+            if pad > 0 { micBuffer.append(contentsOf: repeatElement(0, count: pad)) }
+        }
+
         // Determine how many frames we can write. If one channel has no data
         // at all (system tap failed, or mic is the only source), pad it with
         // silence so the writer isn't blocked indefinitely.
